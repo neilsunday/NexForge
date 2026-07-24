@@ -1,7 +1,7 @@
 {
   "name": "nexaks",
-  "version": "1.0.0",
-  "description": "NexaKS - Key System with HWID lock and Discord bot integration",
+  "version": "2.0.0",
+  "description": "NexaKS - Enterprise script authentication with Discord bot",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -13,9 +13,11 @@
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "discord.js": "^14.15.3",
+    "@supabase/supabase-js": "^2.45.0"
   },
-  "keywords": ["keysystem", "hwid", "discord", "roblox"],
+  "keywords": ["keysystem", "hwid", "discord", "roblox", "authentication"],
   "author": "neilsunday",
   "license": "MIT"
 }
