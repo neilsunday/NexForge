@@ -10,49 +10,6 @@
  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
-    <!-- DEBUG: Visible error catcher -->
-    <div id="debug-panel" style="position:fixed;top:0;left:0;right:0;background:#dc2626;color:white;padding:10px;font-family:monospace;font-size:12px;z-index:99999;display:none;max-height:40vh;overflow:auto;">
-        <strong>JS ERROR:</strong> <span id="debug-msg"></span>
-        <button onclick="document.getElementById('debug-panel').style.display='none'" style="float:right;background:white;color:#dc2626;border:none;padding:2px 8px;cursor:pointer;">X</button>
-    </div>
-    <script>
-        window.addEventListener('error', function(e) {
-            var panel = document.getElementById('debug-panel');
-            var msg = document.getElementById('debug-msg');
-            panel.style.display = 'block';
-            msg.innerHTML = (msg.innerHTML ? msg.innerHTML + '<br>' : '') +
-                (e.message || 'Unknown') + ' at ' + (e.filename || '?') + ':' + (e.lineno || '?');
-        });
-        window.addEventListener('unhandledrejection', function(e) {
-            var panel = document.getElementById('debug-panel');
-            var msg = document.getElementById('debug-msg');
-            panel.style.display = 'block';
-            msg.innerHTML = (msg.innerHTML ? msg.innerHTML + '<br>' : '') +
-                'PROMISE: ' + (e.reason && e.reason.message ? e.reason.message : JSON.stringify(e.reason));
-        });
-        // Check after 2 seconds if NexaKS loaded
-        setTimeout(function() {
-            if (typeof NexaKS === 'undefined') {
-                var panel = document.getElementById('debug-panel');
-                var msg = document.getElementById('debug-msg');
-                panel.style.display = 'block';
-                msg.innerHTML = (msg.innerHTML ? msg.innerHTML + '<br>' : '') +
-                    'NexaKS is UNDEFINED â€” supabase.js failed to load or execute';
-            } else if (typeof NexaKS.signInWithDiscord !== 'function') {
-                var panel = document.getElementById('debug-panel');
-                var msg = document.getElementById('debug-msg');
-                panel.style.display = 'block';
-                msg.innerHTML = (msg.innerHTML ? msg.innerHTML + '<br>' : '') +
-                    'NexaKS.signInWithDiscord is not a function';
-            } else {
-                var panel = document.getElementById('debug-panel');
-                panel.style.background = '#059669';
-                panel.style.display = 'block';
-                document.getElementById('debug-msg').innerHTML = 'OK: NexaKS loaded correctly. Click Sign In to test.';
-            }
-        }, 2000);
-    </script>
-
  <div class="bg-gradient"></div>
  <div class="bg-grid"></div>
 
@@ -407,13 +364,31 @@
  </div>
  </footer>
 
- <!-- Supabase JS SDK -->
- <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
- <script src="js/supabase.js"></script>
- <script src="js/main.js"></script>
- <script>
- // Redirect to dashboard if already logged in
- NexaKS.redirectIfAuthed();
- </script>
+ 
+    <!-- Supabase JS SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+    <script src="js/main.js"></script>
+    <script>
+        // Silent session check â€” if logged in, change Sign In button text
+        (async () => {
+            try {
+                const user = await NexaKS.getCurrentUser();
+                if (user) {
+                    // User is logged in â€” update all Sign In buttons
+                    document.querySelectorAll('button[onclick*="signInWithDiscord"]').forEach(btn => {
+                        btn.setAttribute('onclick', "window.location.href='/dashboard'");
+                        const textNode = Array.from(btn.childNodes).find(n => n.nodeType === 3 || (n.nodeType === 1 && n.tagName !== 'svg'));
+                        if (textNode && textNode.textContent) {
+                            btn.innerHTML = btn.innerHTML.replace(/Sign In|Continue with Discord|Get Started|Start Free Trial|Sign In with Discord/, 'Go to Dashboard');
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Session check:', e);
+            }
+        })();
+    </script>
+
 </body>
 </html>
