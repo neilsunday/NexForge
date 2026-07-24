@@ -43,7 +43,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             loadStats(),
             loadKeys(),
             loadUsers(),
-            loadLogs()
+            loadLogs(),
+            loadScripts()
         ]);
 
         if (loader) loader.style.display = 'none';
@@ -500,3 +501,191 @@ function showToast(message, type) {
         setTimeout(() => toast.remove(), 300);
     }, 3500);
 }
+
+// ========== Scripts Management ==========
+let allScripts = [];
+
+async function loadScripts() {
+    try {
+        const { data, error } = await NexaKS.supabase
+            .from('scripts').select('*, users!scripts_created_by_fkey(username)')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        allScripts = data || [];
+
+        const desc = document.getElementById('scriptsDesc');
+        if (desc) desc.textContent = allScripts.length + ' total scripts';
+
+        renderScriptsTable();
+    } catch (e) {
+        console.error('loadScripts:', e);
+        const tbody = document.getElementById('scriptsTableBody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:32px;">Failed to load scripts: ' + e.message + '</td></tr>';
+    }
+}
+
+function renderScriptsTable() {
+    const tbody = document.getElementById('scriptsTableBody');
+    if (!tbody) return;
+
+    if (!allScripts.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">No scripts yet. Click "Add New Script" to create your first one.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = allScripts.map(s => {
+        const planClass = s.plan_required === 'enterprise' ? 'badge-warning' : s.plan_required === 'pro' ? 'badge-info' : 'badge';
+        const statusClass = s.is_active ? 'badge-success' : 'badge';
+        const statusText = s.is_active ? 'active' : 'inactive';
+        return '<tr>' +
+            '<td style="font-weight:600;">' + escapeHtml(s.name) + '</td>' +
+            '<td style="color:var(--text-secondary);font-size:13px;">' + escapeHtml(s.description || '-').substring(0, 60) + '</td>' +
+            '<td><span class="badge ' + planClass + '">' + s.plan_required + '</span></td>' +
+            '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
+            '<td><div class="table-actions">' +
+                '<button class="icon-btn" title="Edit" onclick="openScriptModal(\'' + s.id + '\')">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                '</button>' +
+                '<button class="icon-btn" title="Toggle" onclick="toggleScript(\'' + s.id + '\', ' + (!s.is_active) + ')">' +
+                    (s.is_active
+                        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>'
+                        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5 9-11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                    ) +
+                '</button>' +
+                '<button class="icon-btn danger" title="Delete" onclick="deleteScript(\'' + s.id + '\')">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                '</button>' +
+            '</div></td>' +
+        '</tr>';
+    }).join('');
+}
+
+function escapeHtml(str) {
+    return String(str || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// ========== Script Modal ==========
+let editingScriptId = null;
+
+function openScriptModal(scriptId) {
+    editingScriptId = scriptId || null;
+    const modal = document.getElementById('scriptModal');
+    const title = document.getElementById('scriptModalTitle');
+    const nameInput = document.getElementById('scriptNameInput');
+    const descInput = document.getElementById('scriptDescInput');
+    const planInput = document.getElementById('scriptPlanInput');
+    const contentInput = document.getElementById('scriptContentInput');
+    const activeInput = document.getElementById('scriptActiveInput');
+
+    if (scriptId) {
+        const s = allScripts.find(x => x.id === scriptId);
+        if (!s) return showToast('Script not found', 'error');
+        title.textContent = 'Edit Script';
+        nameInput.value = s.name;
+        descInput.value = s.description || '';
+        planInput.value = s.plan_required;
+        contentInput.value = s.script_content;
+        activeInput.checked = s.is_active;
+    } else {
+        title.textContent = 'Add New Script';
+        nameInput.value = '';
+        descInput.value = '';
+        planInput.value = 'free';
+        contentInput.value = '-- Paste your Lua script here\nprint("Hello from NexaKS!")';
+        activeInput.checked = true;
+    }
+
+    modal.classList.add('active');
+}
+
+function closeScriptModal() {
+    document.getElementById('scriptModal')?.classList.remove('active');
+    editingScriptId = null;
+}
+
+async function saveScript() {
+    const name = document.getElementById('scriptNameInput').value.trim();
+    const description = document.getElementById('scriptDescInput').value.trim();
+    const plan_required = document.getElementById('scriptPlanInput').value;
+    const script_content = document.getElementById('scriptContentInput').value;
+    const is_active = document.getElementById('scriptActiveInput').checked;
+
+    if (!name) return showToast('Name is required', 'error');
+    if (!script_content.trim()) return showToast('Script content is required', 'error');
+
+    showToast(editingScriptId ? 'Updating script...' : 'Creating script...', 'info');
+
+    try {
+        if (editingScriptId) {
+            const { error } = await NexaKS.supabase.from('scripts')
+                .update({ name, description, plan_required, script_content, is_active })
+                .eq('id', editingScriptId);
+            if (error) throw error;
+            await NexaKS.supabase.from('logs').insert({
+                user_id: currentUser.id, action: 'admin_script_edit', status: 'success',
+                metadata: { message: 'Edited script: ' + name }
+            });
+            showToast('Script updated', 'success');
+        } else {
+            const { error } = await NexaKS.supabase.from('scripts').insert({
+                name, description, plan_required, script_content, is_active,
+                created_by: currentUser.id
+            });
+            if (error) throw error;
+            await NexaKS.supabase.from('logs').insert({
+                user_id: currentUser.id, action: 'admin_script_create', status: 'success',
+                metadata: { message: 'Created script: ' + name + ' (' + plan_required + ')' }
+            });
+            showToast('Script created', 'success');
+        }
+        closeScriptModal();
+        await loadScripts();
+    } catch (e) {
+        showToast('Save failed: ' + e.message, 'error');
+    }
+}
+
+async function toggleScript(id, newActiveState) {
+    const script = allScripts.find(s => s.id === id);
+    if (!script) return;
+
+    const { error } = await NexaKS.supabase.from('scripts')
+        .update({ is_active: newActiveState }).eq('id', id);
+    if (error) return showToast('Toggle failed: ' + error.message, 'error');
+
+    await NexaKS.supabase.from('logs').insert({
+        user_id: currentUser.id,
+        action: newActiveState ? 'admin_script_enable' : 'admin_script_disable',
+        status: 'success',
+        metadata: { message: (newActiveState ? 'Enabled' : 'Disabled') + ' script: ' + script.name }
+    });
+
+    showToast('Script ' + (newActiveState ? 'enabled' : 'disabled'), 'success');
+    await loadScripts();
+}
+
+async function deleteScript(id) {
+    const script = allScripts.find(s => s.id === id);
+    if (!script) return;
+    if (!confirm('Delete "' + script.name + '"? This cannot be undone.')) return;
+
+    const { error } = await NexaKS.supabase.from('scripts').delete().eq('id', id);
+    if (error) return showToast('Delete failed: ' + error.message, 'error');
+
+    await NexaKS.supabase.from('logs').insert({
+        user_id: currentUser.id, action: 'admin_script_delete', status: 'success',
+        metadata: { message: 'Deleted script: ' + script.name }
+    });
+
+    showToast('Script deleted', 'success');
+    await loadScripts();
+}
+
+// Modal ESC + overlay click
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeScriptModal();
+});
+document.getElementById('scriptModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'scriptModal') closeScriptModal();
+});
