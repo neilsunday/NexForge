@@ -1,5 +1,5 @@
 /* ========================================
-   NexaKS â€” Supabase Client
+   NexaKS - Supabase Client
    Shared config for all pages
    ======================================== */
 
@@ -7,8 +7,8 @@
 const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
 
-// Initialize Supabase client (assumes @supabase/supabase-js loaded via CDN in HTML)
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+// FIX: use `sb` instead of `supabase` to avoid collision with window.supabase from CDN
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
         autoRefreshToken: true,
         persistSession: true,
@@ -18,12 +18,8 @@ const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 // ========== Auth helpers ==========
 
-/**
- * Sign in with Discord OAuth
- * Redirects user to Discord for authorization, then back to /dashboard
- */
 async function signInWithDiscord() {
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { data, error } = await sb.auth.signInWithOAuth({
         provider: 'discord',
         options: {
             redirectTo: window.location.origin + '/dashboard',
@@ -38,11 +34,8 @@ async function signInWithDiscord() {
     return { data, error };
 }
 
-/**
- * Sign out current user, redirect to landing page
- */
 async function signOut() {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await sb.auth.signOut();
     if (error) {
         console.error('Sign-out error:', error);
         return;
@@ -50,20 +43,14 @@ async function signOut() {
     window.location.href = '/';
 }
 
-/**
- * Get current logged-in user, or null if not authenticated
- */
 async function getCurrentUser() {
-    const { data: { user }, error } = await supabase.auth.getUser();
+    const { data: { user }, error } = await sb.auth.getUser();
     if (error || !user) return null;
     return user;
 }
 
-/**
- * Get user profile from `users` table (custom data)
- */
 async function getUserProfile(userId) {
-    const { data, error } = await supabase
+    const { data, error } = await sb
         .from('users')
         .select('*')
         .eq('id', userId)
@@ -76,10 +63,6 @@ async function getUserProfile(userId) {
     return data;
 }
 
-/**
- * Redirect to login (index.html) if not authenticated
- * Use sa protected pages tulad ng dashboard.html at admin.html
- */
 async function requireAuth() {
     const user = await getCurrentUser();
     if (!user) {
@@ -89,10 +72,6 @@ async function requireAuth() {
     return user;
 }
 
-/**
- * Redirect to dashboard if already logged in
- * Use sa index.html para hindi na lumabas ang landing kung logged in na
- */
 async function redirectIfAuthed() {
     const user = await getCurrentUser();
     if (user) {
@@ -100,9 +79,9 @@ async function redirectIfAuthed() {
     }
 }
 
-// Expose helpers globally
+// Expose helpers globally â€” `supabase` key here refers to our client (sb)
 window.NexaKS = {
-    supabase,
+    supabase: sb,
     signInWithDiscord,
     signOut,
     getCurrentUser,
