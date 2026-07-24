@@ -1,18 +1,17 @@
 /* ========================================
-   NexaKS - Supabase Client
-   Shared config for all pages
+   NexaKS - Supabase Client (with session wait)
    ======================================== */
 
-// Load Supabase from CDN (walang npm needed sa frontend)
 const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
 
-// FIX: use `sb` instead of `supabase` to avoid collision with window.supabase from CDN
+// Use `sb` to avoid collision with window.supabase from CDN
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
+        flowType: 'implicit'
     }
 });
 
@@ -43,10 +42,43 @@ async function signOut() {
     window.location.href = '/';
 }
 
+/**
+ * Wait for session to be established (handles OAuth callback delay)
+ * Returns session or null after timeout
+ */
+async function waitForSession(maxWaitMs = 3000) {
+    // If URL has OAuth callback hash, wait for Supabase to process it
+    const hasAuthHash = window.location.hash.includes('access_token') ||
+                       window.location.hash.includes('error');
+
+    // Try immediately first
+    let { data: { session } } = await sb.auth.getSession();
+    if (session) return session;
+
+    // If we have auth hash but no session yet, wait for auth state change
+    if (hasAuthHash) {
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                subscription?.unsubscribe();
+                resolve(null);
+            }, maxWaitMs);
+
+            const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
+                if (session) {
+                    clearTimeout(timeout);
+                    subscription?.unsubscribe();
+                    resolve(session);
+                }
+            });
+        });
+    }
+
+    return null;
+}
+
 async function getCurrentUser() {
-    const { data: { user }, error } = await sb.auth.getUser();
-    if (error || !user) return null;
-    return user;
+    const session = await waitForSession();
+    return session?.user || null;
 }
 
 async function getUserProfile(userId) {
@@ -66,6 +98,7 @@ async function getUserProfile(userId) {
 async function requireAuth() {
     const user = await getCurrentUser();
     if (!user) {
+        // Only redirect if we're truly not authenticated (not just waiting)
         window.location.href = '/';
         return null;
     }
@@ -79,7 +112,7 @@ async function redirectIfAuthed() {
     }
 }
 
-// Expose helpers globally â€” `supabase` key here refers to our client (sb)
+// Expose helpers globally
 window.NexaKS = {
     supabase: sb,
     signInWithDiscord,
@@ -87,5 +120,6 @@ window.NexaKS = {
     getCurrentUser,
     getUserProfile,
     requireAuth,
-    redirectIfAuthed
+    redirectIfAuthed,
+    waitForSession
 };
