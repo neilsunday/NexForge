@@ -140,7 +140,7 @@ async function loadKeys() {
     try {
         const { data, error } = await NexaKS.supabase
             .from('keys')
-            .select('*, users(username, avatar_url)')
+            .select('*, users!keys_user_id_fkey(username, avatar_url)')
             .order('created_at', { ascending: false })
             .limit(200);
 
@@ -331,7 +331,7 @@ async function loadLogs() {
     try {
         const { data, error } = await NexaKS.supabase
             .from('logs')
-            .select('*, users(username)')
+            .select('*, users!logs_user_id_fkey(username)')
             .order('created_at', { ascending: false })
             .limit(100);
 
