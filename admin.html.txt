@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel — KeySystem</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+
+    <div class="dashboard-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <a href="index.html" class="logo">
+                    <span class="logo-icon">⚡</span>
+                    <span class="logo-text">KeySystem</span>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-section-title">Main</div>
+                <a href="dashboard.html">
+                    <span class="sidebar-nav-icon">🏠</span>
+                    Dashboard
+                </a>
+
+                <div class="sidebar-section-title">Admin</div>
+                <a href="admin.html" class="active">
+                    <span class="sidebar-nav-icon">⚙️</span>
+                    Overview
+                </a>
+                <a href="#" onclick="showTab('keys')">
+                    <span class="sidebar-nav-icon">🔑</span>
+                    Manage Keys
+                </a>
+                <a href="#" onclick="showTab('users')">
+                    <span class="sidebar-nav-icon">👥</span>
+                    Users
+                </a>
+                <a href="#" onclick="showTab('logs')">
+                    <span class="sidebar-nav-icon">📋</span>
+                    Audit Logs
+                </a>
+                <a href="#" onclick="showTab('settings')">
+                    <span class="sidebar-nav-icon">🔧</span>
+                    Settings
+                </a>
+
+                <div class="sidebar-section-title">Account</div>
+                <a href="index.html">
+                    <span class="sidebar-nav-icon">🚪</span>
+                    Logout
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main content -->
+        <main class="main-content">
+            <div class="page-header">
+                <div style="display:flex; align-items:center; gap:16px;">
+                    <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+                    <div>
+                        <h1 class="page-title">Admin Panel</h1>
+                        <p class="page-subtitle">System-wide management and analytics</p>
+                    </div>
+                </div>
+                <div class="user-menu">
+                    <div class="user-avatar" style="background:linear-gradient(135deg,#ef4444 0%,#f59e0b 100%);">A</div>
+                    <div class="user-info">
+                        <div class="user-name">Admin</div>
+                        <div class="user-role" style="color:var(--danger);">Owner</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Global stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Total Keys</div>
+                        <div class="stat-card-icon icon-purple">🔑</div>
+                    </div>
+                    <div class="stat-card-value">1,247</div>
+                    <div class="stat-card-change change-up">↑ 34 this week</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Active Users</div>
+                        <div class="stat-card-icon icon-blue">👥</div>
+                    </div>
+                    <div class="stat-card-value">892</div>
+                    <div class="stat-card-change change-up">↑ 18 today</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Verifies/day</div>
+                        <div class="stat-card-icon icon-green">⚡</div>
+                    </div>
+                    <div class="stat-card-value">14.2K</div>
+                    <div class="stat-card-change change-up">↑ 8% vs last week</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Revenue MTD</div>
+                        <div class="stat-card-icon icon-orange">💰</div>
+                    </div>
+                    <div class="stat-card-value">$2,847</div>
+                    <div class="stat-card-change change-up">↑ 22%</div>
+                </div>
+            </div>
+
+            <!-- Generate Keys card -->
+            <div class="card" id="tab-generate">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">🔑 Generate New Keys</div>
+                        <div class="card-desc">Bulk create keys with custom settings</div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+                    <div class="form-group">
+                        <label class="form-label">Quantity</label>
+                        <input type="number" class="form-input" id="genQty" value="10" min="1" max="1000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Duration</label>
+                        <select class="form-select" id="genDuration">
+                            <option value="1">1 day</option>
+                            <option value="7">7 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="90">90 days</option>
+                            <option value="365">1 year</option>
+                            <option value="lifetime">Lifetime</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Plan</label>
+                        <select class="form-select" id="genPlan">
+                            <option value="free">Free</option>
+                            <option value="pro" selected>Pro</option>
+                            <option value="enterprise">Enterprise</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">HWID Reset Limit</label>
+                        <input type="number" class="form-input" id="genResets" value="5" min="0" max="99">
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:12px; margin-top:8px;">
+                    <button class="btn btn-primary" onclick="generateKeys()">
+                        ⚡ Generate Keys
+                    </button>
+                    <button class="btn btn-ghost" onclick="showToast('Export CSV coming soon', 'info')">
+                        📥 Export All
+                    </button>
+                </div>
+            </div>
+
+            <!-- Keys table -->
+            <div class="card" id="tab-keys">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">🔑 All Keys</div>
+                        <div class="card-desc">Manage every key in the system</div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" class="form-input" placeholder="🔍 Search keys..." id="keySearch" style="width:240px;" oninput="filterKeys()">
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Key</th>
+                                <th>User</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Expires</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="keysTableBody">
+                            <tr>
+                                <td style="font-family:monospace; font-size:13px; color:var(--accent-hover);">KSYS-A8F2-9B4E...</td>
+                                <td>@juandelacruz</td>
+                                <td><span class="badge badge-info">Pro</span></td>
+                                <td><span class="badge badge-success">Active</span></td>
+                                <td style="color:var(--text-secondary);">Aug 21, 2026</td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn" title="View" onclick="showToast('Viewing key details', 'info')">👁</button>
+                                        <button class="icon-btn" title="Reset HWID" onclick="showToast('HWID reset', 'success')">🔄</button>
+                                        <button class="icon-btn danger" title="Revoke" onclick="revokeKey(this)">🚫</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="font-family:monospace; font-size:13px; color:var(--accent-hover);">KSYS-B7D3-4E1C...</td>
+                                <td>@marianapples</td>
+                                <td><span class="badge badge-info">Pro</span></td>
+                                <td><span class="badge badge-success">Active</span></td>
+                                <td style="color:var(--text-secondary);">Sep 5, 2026</td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                        <button class="icon-btn">🔄</button>
+                                        <button class="icon-btn danger">🚫</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="font-family:monospace; font-size:13px; color:var(--accent-hover);">KSYS-C2F8-6A9D...</td>
+                                <td>@pedropenduko</td>
+                                <td><span class="badge">Free</span></td>
+                                <td><span class="badge badge-warning">Expiring</span></td>
+                                <td style="color:var(--warning);">2 days</td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                        <button class="icon-btn">🔄</button>
+                                        <button class="icon-btn danger">🚫</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="font-family:monospace; font-size:13px; color:var(--accent-hover);">KSYS-D9E4-1B7F...</td>
+                                <td>@lolasenora</td>
+                                <td><span class="badge badge-warning">Enterprise</span></td>
+                                <td><span class="badge badge-success">Active</span></td>
+                                <td style="color:var(--text-secondary);">Lifetime</td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                        <button class="icon-btn">🔄</button>
+                                        <button class="icon-btn danger">🚫</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="font-family:monospace; font-size:13px; color:var(--text-muted); text-decoration:line-through;">KSYS-E1A5-8C3D...</td>
+                                <td>@bannedguy</td>
+                                <td><span class="badge">Free</span></td>
+                                <td><span class="badge badge-danger">Revoked</span></td>
+                                <td style="color:var(--text-muted);">—</td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Users table -->
+            <div class="card" id="tab-users">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">👥 Users</div>
+                        <div class="card-desc">Discord users registered in the system</div>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Discord</th>
+                                <th>ID</th>
+                                <th>Keys</th>
+                                <th>Joined</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="display:flex; align-items:center; gap:8px;">
+                                    <div class="user-avatar" style="width:28px; height:28px; font-size:12px;">J</div>
+                                    juandelacruz
+                                </td>
+                                <td style="font-family:monospace; font-size:13px; color:var(--text-muted);">847293...</td>
+                                <td>2</td>
+                                <td style="color:var(--text-secondary);">Jun 15, 2026</td>
+                                <td><span class="badge badge-success">Active</span></td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                        <button class="icon-btn danger">🚫</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="display:flex; align-items:center; gap:8px;">
+                                    <div class="user-avatar" style="width:28px; height:28px; font-size:12px;">M</div>
+                                    marianapples
+                                </td>
+                                <td style="font-family:monospace; font-size:13px; color:var(--text-muted);">928374...</td>
+                                <td>1</td>
+                                <td style="color:var(--text-secondary);">Jul 2, 2026</td>
+                                <td><span class="badge badge-success">Active</span></td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                        <button class="icon-btn danger">🚫</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="display:flex; align-items:center; gap:8px;">
+                                    <div class="user-avatar" style="width:28px; height:28px; font-size:12px; background:linear-gradient(135deg,#ef4444,#f59e0b);">B</div>
+                                    bannedguy
+                                </td>
+                                <td style="font-family:monospace; font-size:13px; color:var(--text-muted);">102938...</td>
+                                <td>1</td>
+                                <td style="color:var(--text-secondary);">Jun 20, 2026</td>
+                                <td><span class="badge badge-danger">Banned</span></td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="icon-btn">👁</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Audit logs -->
+            <div class="card" id="tab-logs">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">📋 Audit Logs</div>
+                        <div class="card-desc">System-wide activity — last 24 hours</div>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Details</th>
+                                <th>IP</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="color:var(--text-muted); font-size:13px;">2 mins ago</td>
+                                <td>@juandelacruz</td>
+                                <td><span class="badge badge-success">verify</span></td>
+                                <td>Script executed</td>
+                                <td style="font-family:monospace; font-size:13px;">192.168.**.**</td>
+                            </tr>
+                            <tr>
+                                <td style="color:var(--text-muted); font-size:13px;">5 mins ago</td>
+                                <td>@marianapples</td>
+                                <td><span class="badge badge-info">reset_hwid</span></td>
+                                <td>HWID reset via bot</td>
+                                <td style="font-family:monospace; font-size:13px;">203.144.**.**</td>
+                            </tr>
+                            <tr>
+                                <td style="color:var(--text-muted); font-size:13px;">12 mins ago</td>
+                                <td>@newuser42</td>
+                                <td><span class="badge badge-info">redeem</span></td>
+                                <td>Key KSYS-F3A9... redeemed</td>
+                                <td style="font-family:monospace; font-size:13px;">175.29.**.**</td>
+                            </tr>
+                            <tr>
+                                <td style="color:var(--text-muted); font-size:13px;">18 mins ago</td>
+                                <td>@unknown</td>
+                                <td><span class="badge badge-warning">verify_fail</span></td>
+                                <td>Invalid HWID for key KSYS-A8F2...</td>
+                                <td style="font-family:monospace; font-size:13px;">45.128.**.**</td>
+                            </tr>
+                            <tr>
+                                <td style="color:var(--text-muted); font-size:13px;">1 hour ago</td>
+                                <td>admin</td>
+                                <td><span class="badge badge-danger">revoke</span></td>
+                                <td>Revoked @bannedguy (abuse)</td>
+                                <td style="font-family:monospace; font-size:13px;">system</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Settings -->
+            <div class="card" id="tab-settings">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">🔧 System Settings</div>
+                        <div class="card-desc">Global configuration for your key system</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">HWID Reset Cooldown (hours)</label>
+                    <input type="number" class="form-input" value="24">
+                    <div class="form-hint">Minimum time between HWID resets per user</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Max HWID Resets per Month</label>
+                    <input type="number" class="form-input" value="5">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Discord Bot Token</label>
+                    <input type="password" class="form-input" value="••••••••••••••••••••••••">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Loader API Endpoint</label>
+                    <input type="text" class="form-input" value="https://api.keysystem.io/v1/loader">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Maintenance Mode</label>
+                    <select class="form-select">
+                        <option>Disabled — system running normally</option>
+                        <option>Enabled — block all verify requests</option>
+                    </select>
+                </div>
+
+                <button class="btn btn-primary">💾 Save Settings</button>
+            </div>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="js/admin.js"></script>
+</body>
+</html>
