@@ -161,26 +161,26 @@ function buildPanel() {
         .setDescription(
             'Welcome to **NexaKS** â€” enterprise-grade script authentication.\n\n' +
             'Click the buttons below to manage your license:\n\n' +
-            'Redeem your key\n' +
-            'Get your personalized loader script\n' +
-            'Reset your hardware ID\n' +
-            'View your license stats\n' +
-            'Get your Verified role\n\n' +
+            '**Redeem Key** - Activate your license\n' +
+            '**Get Script** - Receive your personalized loader\n' +
+            '**Reset HWID** - Change device (24h cooldown)\n' +
+            '**Get Stats** - View your license details\n' +
+            '**Get Role** - Claim your Verified role\n\n' +
             '**Warning:** Sharing your key or loader script may result in permanent revocation and ban.'
         )
         .setFooter({ text: 'NexaKS | HWID-locked authentication' })
         .setTimestamp();
 
     const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('panel_redeem').setLabel('Redeem Key').setStyle(ButtonStyle.Success).setEmoji('ðŸ”‘'),
-        new ButtonBuilder().setCustomId('panel_script').setLabel('Get Script').setStyle(ButtonStyle.Primary).setEmoji('ðŸ“œ'),
-        new ButtonBuilder().setCustomId('panel_role').setLabel('Get Role').setStyle(ButtonStyle.Primary).setEmoji('ðŸ‘¤')
+        new ButtonBuilder().setCustomId('panel_redeem').setLabel('Redeem Key').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('panel_script').setLabel('Get Script').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('panel_role').setLabel('Get Role').setStyle(ButtonStyle.Primary)
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID').setStyle(ButtonStyle.Secondary).setEmoji('âš™ï¸'),
-        new ButtonBuilder().setCustomId('panel_stats').setLabel('Get Stats').setStyle(ButtonStyle.Secondary).setEmoji('ðŸ“Š'),
-        new ButtonBuilder().setLabel('Dashboard').setStyle(ButtonStyle.Link).setEmoji('ðŸŒ').setURL(SITE_URL + '/dashboard')
+        new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('panel_stats').setLabel('Get Stats').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setLabel('Open Dashboard').setStyle(ButtonStyle.Link).setURL(SITE_URL + '/dashboard')
     );
 
     return { embeds: [panelEmbed], components: [row1, row2] };
