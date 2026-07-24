@@ -1,25 +1,468 @@
-/* ========================================
-   KeySystem — Admin Panel JS
-   ======================================== */
+/* NexaKS - Admin Panel JS */
 
-// ========== Sidebar Toggle (mobile) ==========
+let currentUser = null;
+let currentProfile = null;
+let allKeys = [];
+let allUsers = [];
+
+// ========== Init ==========
+document.addEventListener('DOMContentLoaded', async () => {
+    const loader = document.getElementById('authLoader');
+    const main = document.getElementById('adminMain');
+    const denied = document.getElementById('deniedState');
+
+    const forceShow = setTimeout(() => {
+        if (loader) loader.style.display = 'none';
+        if (denied) { denied.style.display = 'flex'; }
+    }, 8000);
+
+    try {
+        // Check auth
+        currentUser = await NexaKS.getCurrentUser();
+        if (!currentUser) {
+            clearTimeout(forceShow);
+            window.location.href = '/';
+            return;
+        }
+
+        // Check admin status
+        currentProfile = await NexaKS.getUserProfile(currentUser.id);
+        if (!currentProfile?.is_admin) {
+            clearTimeout(forceShow);
+            if (loader) loader.style.display = 'none';
+            if (denied) denied.style.display = 'flex';
+            return;
+        }
+
+        // User is admin - show panel and load data
+        clearTimeout(forceShow);
+        renderAdminInfo();
+
+        // Load all data in parallel
+        await Promise.all([
+            loadStats(),
+            loadKeys(),
+            loadUsers(),
+            loadLogs()
+        ]);
+
+        if (loader) loader.style.display = 'none';
+        if (main) main.style.display = 'grid';
+
+        // Fade-in
+        document.querySelectorAll('.card, .stat-card').forEach((el, i) => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(10px)';
+            el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+            setTimeout(() => {
+                el.style.opacity = '1';
+                el.style.transform = 'translateY(0)';
+            }, i * 60);
+        });
+    } catch (err) {
+        console.error('Admin init:', err);
+        clearTimeout(forceShow);
+        if (loader) loader.style.display = 'none';
+        if (denied) denied.style.display = 'flex';
+    }
+});
+
+// ========== Render admin header ==========
+function renderAdminInfo() {
+    const meta = currentUser.user_metadata || {};
+    const username = currentProfile?.username || meta.full_name || meta.name || 'Admin';
+    const avatarUrl = currentProfile?.avatar_url || meta.avatar_url;
+
+    const nameEl = document.getElementById('adminName');
+    const avatarImg = document.getElementById('adminAvatarImg');
+    const avatarDiv = document.getElementById('adminAvatar');
+
+    if (nameEl) nameEl.textContent = username;
+    if (avatarUrl && avatarImg) {
+        avatarImg.src = avatarUrl;
+        avatarImg.style.display = 'block';
+        if (avatarDiv) avatarDiv.style.display = 'none';
+    } else if (avatarDiv) {
+        avatarDiv.textContent = username.charAt(0).toUpperCase();
+    }
+}
+
+// ========== Load stats ==========
+async function loadStats() {
+    try {
+        // Total keys
+        const { count: totalKeys } = await NexaKS.supabase
+            .from('keys').select('*', { count: 'exact', head: true });
+
+        // Active keys
+        const { count: activeKeys } = await NexaKS.supabase
+            .from('keys').select('*', { count: 'exact', head: true })
+            .eq('status', 'active');
+
+        // Revoked keys
+        const { count: revoked } = await NexaKS.supabase
+            .from('keys').select('*', { count: 'exact', head: true })
+            .eq('status', 'revoked');
+
+        // Total users
+        const { count: totalUsers } = await NexaKS.supabase
+            .from('users').select('*', { count: 'exact', head: true });
+
+        // Active users (with active key)
+        const { data: activeUserRows } = await NexaKS.supabase
+            .from('keys').select('user_id').eq('status', 'active').not('user_id', 'is', null);
+        const activeUsers = new Set((activeUserRows || []).map(r => r.user_id)).size;
+
+        // Events today
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const { count: eventsToday } = await NexaKS.supabase
+            .from('logs').select('*', { count: 'exact', head: true })
+            .gte('created_at', startOfDay.toISOString());
+
+        // Populate UI
+        const $ = (id) => document.getElementById(id);
+        if ($('statTotalKeys')) $('statTotalKeys').textContent = totalKeys ?? 0;
+        if ($('statTotalKeysSub')) $('statTotalKeysSub').textContent = (activeKeys ?? 0) + ' active';
+        if ($('statActiveUsers')) $('statActiveUsers').textContent = activeUsers;
+        if ($('statActiveUsersSub')) $('statActiveUsersSub').textContent = (totalUsers ?? 0) + ' total users';
+        if ($('statEventsToday')) $('statEventsToday').textContent = eventsToday ?? 0;
+        if ($('statEventsTodaySub')) $('statEventsTodaySub').textContent = 'Since midnight';
+        if ($('statRevoked')) $('statRevoked').textContent = revoked ?? 0;
+        if ($('statRevokedSub')) $('statRevokedSub').textContent = 'Cannot be used';
+    } catch (e) {
+        console.error('loadStats:', e);
+    }
+}
+
+// ========== Load all keys ==========
+async function loadKeys() {
+    try {
+        const { data, error } = await NexaKS.supabase
+            .from('keys')
+            .select('*, users(username, avatar_url)')
+            .order('created_at', { ascending: false })
+            .limit(200);
+
+        if (error) throw error;
+        allKeys = data || [];
+
+        const desc = document.getElementById('keysDesc');
+        if (desc) desc.textContent = 'Showing ' + allKeys.length + ' most recent keys';
+
+        renderKeysTable(allKeys);
+    } catch (e) {
+        console.error('loadKeys:', e);
+        const tbody = document.getElementById('keysTableBody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:32px;">Failed to load keys: ' + e.message + '</td></tr>';
+    }
+}
+
+function renderKeysTable(keys) {
+    const tbody = document.getElementById('keysTableBody');
+    if (!tbody) return;
+
+    if (!keys || keys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px;">No keys yet. Generate some above.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = keys.map(k => {
+        const shortKey = k.key.length > 20 ? k.key.substring(0, 18) + '...' : k.key;
+        const user = k.users?.username || (k.user_id ? 'Unknown' : 'Unclaimed');
+        const planClass = k.plan === 'enterprise' ? 'badge-warning' : k.plan === 'pro' ? 'badge-info' : 'badge';
+        const statusClass = k.status === 'active' ? 'badge-success'
+            : k.status === 'revoked' ? 'badge-danger'
+            : k.status === 'expired' ? 'badge-warning'
+            : 'badge';
+        const expires = k.expires_at
+            ? new Date(k.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : 'Lifetime';
+        const isRevoked = k.status === 'revoked';
+        const keyStyle = isRevoked ? 'font-family:monospace;font-size:12px;color:var(--text-muted);text-decoration:line-through;' : 'font-family:monospace;font-size:12px;color:var(--accent-hover);';
+
+        return '<tr>' +
+            '<td style="' + keyStyle + '">' + shortKey + '</td>' +
+            '<td>' + user + '</td>' +
+            '<td><span class="badge ' + planClass + '">' + k.plan + '</span></td>' +
+            '<td><span class="badge ' + statusClass + '">' + k.status + '</span></td>' +
+            '<td style="color:var(--text-secondary);font-size:13px;">' + expires + '</td>' +
+            '<td><div class="table-actions">' +
+                (isRevoked ? '' :
+                    '<button class="icon-btn" title="Copy key" onclick="copyKeyValue(\'' + k.key + '\')">' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="currentColor" stroke-width="1.5"/></svg>' +
+                    '</button>' +
+                    '<button class="icon-btn danger" title="Revoke" onclick="revokeKeyById(\'' + k.key + '\')">' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M4.9 4.9l14.2 14.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' +
+                    '</button>'
+                ) +
+            '</div></td>' +
+        '</tr>';
+    }).join('');
+}
+
+function filterKeys() {
+    const search = (document.getElementById('keySearch')?.value || '').toLowerCase().trim();
+    if (!search) return renderKeysTable(allKeys);
+
+    const filtered = allKeys.filter(k => {
+        const user = (k.users?.username || '').toLowerCase();
+        return k.key.toLowerCase().includes(search) ||
+               user.includes(search) ||
+               k.plan.toLowerCase().includes(search) ||
+               k.status.toLowerCase().includes(search);
+    });
+    renderKeysTable(filtered);
+}
+
+function copyKeyValue(key) {
+    navigator.clipboard.writeText(key).then(() => showToast('Key copied', 'success'))
+        .catch(() => showToast('Failed to copy', 'error'));
+}
+
+async function revokeKeyById(key) {
+    if (!confirm('Revoke this key permanently? The user will lose access immediately.')) return;
+
+    showToast('Revoking key...', 'info');
+
+    const { error } = await NexaKS.supabase
+        .from('keys').update({ status: 'revoked' }).eq('key', key);
+
+    if (error) return showToast('Revoke failed: ' + error.message, 'error');
+
+    await NexaKS.supabase.from('logs').insert({
+        user_id: currentUser.id,
+        key: key,
+        action: 'admin_revoke',
+        status: 'success',
+        metadata: { message: 'Key revoked by admin ' + (currentProfile?.username || 'admin') }
+    });
+
+    showToast('Key revoked successfully', 'success');
+    await loadKeys();
+    await loadStats();
+}
+
+// ========== Load users ==========
+async function loadUsers() {
+    try {
+        const { data, error } = await NexaKS.supabase
+            .from('users').select('*').order('created_at', { ascending: false }).limit(100);
+
+        if (error) throw error;
+        allUsers = data || [];
+
+        const desc = document.getElementById('usersDesc');
+        if (desc) desc.textContent = allUsers.length + ' total users';
+
+        // Get key counts per user
+        const { data: keyRows } = await NexaKS.supabase
+            .from('keys').select('user_id').not('user_id', 'is', null);
+        const keyCountMap = {};
+        (keyRows || []).forEach(r => {
+            keyCountMap[r.user_id] = (keyCountMap[r.user_id] || 0) + 1;
+        });
+
+        const tbody = document.getElementById('usersTableBody');
+        if (!tbody) return;
+
+        if (allUsers.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">No users yet</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = allUsers.map(u => {
+            const avatar = u.avatar_url
+                ? '<img src="' + u.avatar_url + '" style="width:24px;height:24px;border-radius:50%;">'
+                : '<div class="user-avatar" style="width:24px;height:24px;font-size:11px;">' + (u.username || 'U').charAt(0).toUpperCase() + '</div>';
+            const joined = u.created_at
+                ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : '-';
+            const keyCount = keyCountMap[u.id] || 0;
+            const statusBadge = u.is_banned
+                ? '<span class="badge badge-danger">Banned</span>'
+                : u.is_admin
+                ? '<span class="badge badge-warning">Admin</span>'
+                : '<span class="badge badge-success">Active</span>';
+
+            return '<tr>' +
+                '<td><div style="display:flex;align-items:center;gap:8px;">' + avatar + '<span>' + (u.username || 'Unknown') + '</span></div></td>' +
+                '<td style="color:var(--text-secondary);font-size:13px;">' + joined + '</td>' +
+                '<td>' + keyCount + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td><div class="table-actions">' +
+                    (u.id === currentUser.id ? '<span style="color:var(--text-muted);font-size:12px;padding:0 8px;">You</span>' :
+                    u.is_banned
+                        ? '<button class="icon-btn" title="Unban" onclick="toggleBan(\'' + u.id + '\', false)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5 9-11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'
+                        : '<button class="icon-btn danger" title="Ban user" onclick="toggleBan(\'' + u.id + '\', true)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M4.9 4.9l14.2 14.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>'
+                    ) +
+                '</div></td>' +
+            '</tr>';
+        }).join('');
+    } catch (e) {
+        console.error('loadUsers:', e);
+        const tbody = document.getElementById('usersTableBody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:32px;">Failed to load users: ' + e.message + '</td></tr>';
+    }
+}
+
+async function toggleBan(userId, banned) {
+    const action = banned ? 'Ban this user' : 'Unban this user';
+    if (!confirm(action + '? This will ' + (banned ? 'block' : 'restore') + ' their access.')) return;
+
+    const { error } = await NexaKS.supabase
+        .from('users').update({ is_banned: banned }).eq('id', userId);
+
+    if (error) return showToast('Failed: ' + error.message, 'error');
+
+    await NexaKS.supabase.from('logs').insert({
+        user_id: currentUser.id,
+        action: banned ? 'admin_ban' : 'admin_unban',
+        status: 'success',
+        metadata: { message: (banned ? 'Banned' : 'Unbanned') + ' user ' + userId }
+    });
+
+    showToast('User ' + (banned ? 'banned' : 'unbanned'), 'success');
+    await loadUsers();
+}
+
+// ========== Load logs ==========
+async function loadLogs() {
+    try {
+        const { data, error } = await NexaKS.supabase
+            .from('logs')
+            .select('*, users(username)')
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        if (error) throw error;
+
+        const desc = document.getElementById('logsDesc');
+        if (desc) desc.textContent = 'Latest ' + (data?.length || 0) + ' events';
+
+        const tbody = document.getElementById('logsTableBody');
+        if (!tbody) return;
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">No activity yet</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = data.map(log => {
+            const time = timeAgo(new Date(log.created_at));
+            const user = log.users?.username || 'System';
+            const cls = log.status === 'success' ? 'badge-success'
+                : log.status === 'failed' ? 'badge-danger'
+                : log.status === 'warning' ? 'badge-warning'
+                : 'badge-info';
+            return '<tr>' +
+                '<td style="color:var(--text-muted);font-size:13px;">' + time + '</td>' +
+                '<td>' + user + '</td>' +
+                '<td><span class="badge ' + cls + '">' + log.action + '</span></td>' +
+                '<td style="color:var(--text-secondary);font-size:13px;">' + (log.metadata?.message || '-') + '</td>' +
+            '</tr>';
+        }).join('');
+    } catch (e) {
+        console.error('loadLogs:', e);
+        const tbody = document.getElementById('logsTableBody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger);padding:32px;">Failed to load logs: ' + e.message + '</td></tr>';
+    }
+}
+
+// ========== Generate keys ==========
+function generateKeyString() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const segments = [];
+    for (let s = 0; s < 4; s++) {
+        let seg = '';
+        for (let i = 0; i < 4; i++) {
+            seg += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        segments.push(seg);
+    }
+    return 'NXKS-' + segments.join('-');
+}
+
+async function generateKeys() {
+    const btn = document.getElementById('genBtn');
+    const qty = parseInt(document.getElementById('genQty').value) || 1;
+    const duration = document.getElementById('genDuration').value;
+    const plan = document.getElementById('genPlan').value;
+    const resets = parseInt(document.getElementById('genResets').value) || 5;
+
+    if (qty < 1 || qty > 500) return showToast('Quantity must be 1-500', 'error');
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+    showToast('Generating ' + qty + ' ' + plan.toUpperCase() + ' keys...', 'info');
+
+    try {
+        const keys = [];
+        const rows = [];
+        for (let i = 0; i < qty; i++) {
+            const key = generateKeyString();
+            keys.push(key);
+            rows.push({
+                key: key,
+                plan: plan,
+                duration_days: duration === 'lifetime' ? null : parseInt(duration),
+                hwid_reset_limit: resets,
+                status: 'unclaimed',
+                created_by: currentUser.id
+            });
+        }
+
+        const { error } = await NexaKS.supabase.from('keys').insert(rows);
+        if (error) throw error;
+
+        // Log it
+        await NexaKS.supabase.from('logs').insert({
+            user_id: currentUser.id,
+            action: 'admin_generate',
+            status: 'success',
+            metadata: { message: 'Generated ' + qty + ' ' + plan + ' keys (' + duration + ')' }
+        });
+
+        showToast('Successfully generated ' + qty + ' keys!', 'success');
+        downloadKeysFile(keys, plan, duration);
+        await loadKeys();
+        await loadStats();
+        await loadLogs();
+    } catch (err) {
+        console.error('Generate:', err);
+        showToast('Generation failed: ' + err.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg> Generate Keys'; }
+    }
+}
+
+function downloadKeysFile(keys, plan, duration) {
+    const header = 'NexaKS - Generated Keys\nPlan: ' + plan.toUpperCase() + '\nDuration: ' + duration + '\nGenerated: ' + new Date().toISOString() + '\nTotal: ' + keys.length + '\n\n=========================\n\n';
+    const content = header + keys.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'nexaks-keys-' + plan + '-' + Date.now() + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ========== Nav helpers ==========
 function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    sidebar.classList.toggle('open');
+    document.getElementById('sidebar')?.classList.toggle('open');
 }
 
 document.addEventListener('click', (e) => {
     const sidebar = document.getElementById('sidebar');
     const toggle = document.querySelector('.sidebar-toggle');
-    if (window.innerWidth <= 968 &&
-        sidebar.classList.contains('open') &&
-        !sidebar.contains(e.target) &&
-        !toggle.contains(e.target)) {
+    if (window.innerWidth <= 968 && sidebar?.classList.contains('open') &&
+        !sidebar.contains(e.target) && !toggle?.contains(e.target)) {
         sidebar.classList.remove('open');
     }
 });
 
-// ========== Tab Scroll Navigation ==========
 function showTab(tab) {
     const target = document.getElementById('tab-' + tab);
     if (target) {
@@ -28,153 +471,32 @@ function showTab(tab) {
         target.style.boxShadow = '0 0 0 2px var(--accent)';
         setTimeout(() => target.style.boxShadow = '', 1500);
     }
-    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar')?.classList.remove('open');
 }
 
-// ========== Generate Keys ==========
-function generateKeys() {
-    const qty = parseInt(document.getElementById('genQty').value) || 1;
-    const duration = document.getElementById('genDuration').value;
-    const plan = document.getElementById('genPlan').value;
-    const resets = document.getElementById('genResets').value;
-
-    if (qty < 1 || qty > 1000) {
-        showToast('Quantity must be between 1 and 1000', 'error');
-        return;
-    }
-
-    showToast(`⚡ Generating ${qty} ${plan.toUpperCase()} keys...`, 'info');
-
-    // Simulate generation — replace with Supabase insert later
-    setTimeout(() => {
-        const keys = [];
-        for (let i = 0; i < qty; i++) {
-            keys.push(generateKeyString());
-        }
-
-        showToast(`✓ Successfully generated ${qty} keys!`, 'success');
-        console.log('Generated keys:', keys);
-        console.log('Settings:', { plan, duration, resets });
-
-        // TODO: Insert to Supabase
-        // await supabase.from('keys').insert(keys.map(k => ({ key: k, plan, ... })));
-
-        // Auto-download as .txt
-        downloadKeys(keys, plan, duration);
-    }, 1200);
+async function handleLogout() {
+    if (!confirm('Sign out from NexaKS?')) return;
+    await NexaKS.signOut();
 }
 
-function generateKeyString() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const segments = [];
-    for (let s = 0; s < 5; s++) {
-        let seg = '';
-        for (let i = 0; i < 4; i++) {
-            seg += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        segments.push(seg);
-    }
-    return 'KSYS-' + segments.join('-');
+function timeAgo(date) {
+    const s = Math.floor((new Date() - date) / 1000);
+    if (s < 60) return 'Just now';
+    if (s < 3600) return Math.floor(s / 60) + ' mins ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' hours ago';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function downloadKeys(keys, plan, duration) {
-    const header = `KeySystem — Generated Keys\nPlan: ${plan.toUpperCase()}\nDuration: ${duration}\nGenerated: ${new Date().toISOString()}\nTotal: ${keys.length}\n\n=========================\n\n`;
-    const content = header + keys.join('\n');
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `keys-${plan}-${Date.now()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-// ========== Filter Keys ==========
-function filterKeys() {
-    const search = document.getElementById('keySearch').value.toLowerCase();
-    const rows = document.querySelectorAll('#keysTableBody tr');
-
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
-    });
-}
-
-// ========== Revoke Key ==========
-function revokeKey(btn) {
-    if (!confirm('Revoke this key permanently? The user will lose access immediately.')) {
-        return;
-    }
-
-    const row = btn.closest('tr');
-    const keyCell = row.cells[0];
-    const statusCell = row.cells[3];
-
-    // Update UI
-    keyCell.style.color = 'var(--text-muted)';
-    keyCell.style.textDecoration = 'line-through';
-    statusCell.innerHTML = '<span class="badge badge-danger">Revoked</span>';
-
-    // Remove action buttons except view
-    const actions = row.querySelector('.table-actions');
-    actions.innerHTML = '<button class="icon-btn">👁</button>';
-
-    showToast('Key revoked successfully', 'success');
-
-    // TODO: await supabase.from('keys').update({ status: 'revoked' }).eq('key', keyValue);
-}
-
-// ========== Toast Notifications ==========
-function showToast(message, type = 'info') {
+function showToast(message, type) {
+    type = type || 'info';
     const container = document.getElementById('toastContainer');
+    if (!container) return;
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-
-    const icons = {
-        success: '✓',
-        error: '✕',
-        info: 'ℹ'
-    };
-
-    toast.innerHTML = `
-        <span style="font-size:16px; font-weight:700;">${icons[type] || 'ℹ'}</span>
-        <span>${message}</span>
-    `;
-
+    toast.className = 'toast ' + type;
+    toast.innerHTML = '<span>' + message + '</span>';
     container.appendChild(toast);
-
     setTimeout(() => {
         toast.style.animation = 'slideIn 0.3s ease reverse';
         setTimeout(() => toast.remove(), 300);
     }, 3500);
 }
-
-// ========== Admin Auth Check (placeholder) ==========
-function checkAdminAccess() {
-    // TODO: Real check with Supabase
-    // const { data: { user } } = await supabase.auth.getUser();
-    // const { data } = await supabase.from('users').select('is_admin').eq('discord_id', user.id).single();
-    // if (!data?.is_admin) { window.location.href = 'dashboard.html'; }
-
-    console.log('%c⚠ Admin access — verify identity in production', 'color:#f59e0b; font-weight:700;');
-}
-
-// ========== Init ==========
-document.addEventListener('DOMContentLoaded', () => {
-    checkAdminAccess();
-
-    // Fade-in cards
-    document.querySelectorAll('.card, .stat-card').forEach((el, i) => {
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(10px)';
-        el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
-        setTimeout(() => {
-            el.style.opacity = '1';
-            el.style.transform = 'translateY(0)';
-        }, i * 60);
-    });
-});
-
-console.log('%c⚙ KeySystem Admin Panel', 'color:#ef4444; font-size:18px; font-weight:800;');
