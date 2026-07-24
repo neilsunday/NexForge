@@ -1,5 +1,5 @@
 /* ========================================
-   NexForge â€” Supabase Client
+   NexaKS â€” Supabase Client
    Shared config for all pages
    ======================================== */
 
@@ -101,7 +101,7 @@ async function redirectIfAuthed() {
 }
 
 // Expose helpers globally
-window.NexForge = {
+window.NexaKS = {
     supabase,
     signInWithDiscord,
     signOut,
