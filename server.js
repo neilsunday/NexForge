@@ -1,5 +1,5 @@
 /* ========================================
-   NexForge — Web Server
+   NexForge â€” Web Server
    Serves static UI + ready for API endpoints later
    ======================================== */
 
@@ -29,7 +29,7 @@ app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-// ========== API Endpoints (placeholders — sasagawaan natin later) ==========
+// ========== API Endpoints (placeholders â€” sasagawaan natin later) ==========
 
 // Health check (para sa UptimeRobot ping)
 app.get('/api/health', (req, res) => {
@@ -41,7 +41,7 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Verify endpoint (for Lua loader — future)
+// Verify endpoint (for Lua loader â€” future)
 app.post('/api/verify', (req, res) => {
     const { key, hwid } = req.body;
     // TODO: Check Supabase for key + hwid match
@@ -51,7 +51,7 @@ app.post('/api/verify', (req, res) => {
     });
 });
 
-// Redeem key (for Discord bot — future)
+// Redeem key (for Discord bot â€” future)
 app.post('/api/redeem', (req, res) => {
     const { key, discord_id } = req.body;
     // TODO: Bind key to discord user in Supabase
@@ -61,7 +61,7 @@ app.post('/api/redeem', (req, res) => {
     });
 });
 
-// Reset HWID (for Discord bot — future)
+// Reset HWID (for Discord bot â€” future)
 app.post('/api/reset-hwid', (req, res) => {
     const { discord_id } = req.body;
     // TODO: Clear HWID with cooldown check
@@ -78,6 +78,6 @@ app.use((req, res) => {
 
 // ========== Start server ==========
 app.listen(PORT, () => {
-    console.log(`⚡ NexForge running on port ${PORT}`);
-    console.log(`🌐 http://localhost:${PORT}`);
+    console.log(`âš¡ NexForge running on port ${PORT}`);
+    console.log(`ðŸŒ http://localhost:${PORT}`);
 });
