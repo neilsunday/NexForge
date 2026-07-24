@@ -69,6 +69,10 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM14 2v6h6M8 13h8M8 17h8M8 9h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     Audit Logs
                 </a>
+                <a href="#" onclick="showTab('scripts'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Scripts
+                </a>
 
                 <div class="sidebar-section-title">Account</div>
                 <a href="#" onclick="handleLogout(); return false;">
@@ -275,7 +279,86 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Scripts Management -->
+            <div class="card" id="tab-scripts">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Scripts Management</div>
+                        <div class="card-desc" id="scriptsDesc">Loading...</div>
+                    </div>
+                    <button class="btn btn-primary" onclick="openScriptModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        Add New Script
+                    </button>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Description</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scriptsTableBody">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </main>
+    </div>
+
+    <!-- Script Modal -->
+    <div class="modal-overlay" id="scriptModal">
+        <div class="modal" style="max-width:640px;">
+            <div class="modal-title" id="scriptModalTitle">Add New Script</div>
+            <div class="modal-desc">Configure the Lua script na i-return sa users based sa plan nila.</div>
+
+            <div class="form-group">
+                <label class="form-label">Script Name</label>
+                <input type="text" class="form-input" id="scriptNameInput" placeholder="e.g. Main Script v2.0">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Description (optional)</label>
+                <input type="text" class="form-input" id="scriptDescInput" placeholder="Short description sa admin panel">
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-group">
+                    <label class="form-label">Required Plan</label>
+                    <select class="form-select" id="scriptPlanInput">
+                        <option value="free">Free</option>
+                        <option value="pro" selected>Pro</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
+                    <div class="form-hint">Higher plans can access lower-tier scripts too</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <label style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-primary);border:1px solid var(--border-strong);border-radius:var(--radius-sm);cursor:pointer;">
+                        <input type="checkbox" id="scriptActiveInput" checked style="width:16px;height:16px;cursor:pointer;">
+                        <span>Active (returned to users)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Script Content (Lua)</label>
+                <textarea class="form-textarea" id="scriptContentInput" style="min-height:200px;font-family:'JetBrains Mono',monospace;font-size:13px;" placeholder="-- Paste your Lua script here"></textarea>
+                <div class="form-hint">This exact content will be returned to authorized users. Include your loader logic here.</div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeScriptModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveScript()">Save Script</button>
+            </div>
+        </div>
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
