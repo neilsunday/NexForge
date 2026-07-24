@@ -1,7 +1,7 @@
 {
-  "name": "nexforge",
+  "name": "nexaks",
   "version": "1.0.0",
-  "description": "NexForge — Key System with HWID lock and Discord bot integration",
+  "description": "NexaKS - Key System with HWID lock and Discord bot integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
