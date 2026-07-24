@@ -1,112 +1,70 @@
 /* ========================================
-   NexaKS â€” Supabase Client
-   Shared config for all pages
+   NexaKS â€” Web Server
+   Serves static UI + placeholder API endpoints
    ======================================== */
 
-// Load Supabase from CDN (walang npm needed sa frontend)
-const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+require('dotenv').config();
 
-// Initialize Supabase client (assumes @supabase/supabase-js loaded via CDN in HTML)
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true
-    }
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// ========== Middleware ==========
+app.use(cors());
+app.use(express.json());
+app.use(express.static(__dirname));
+
+// ========== HTML Routes ==========
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// ========== Auth helpers ==========
+// Support both /dashboard and /dashboard.html
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dashboard.html'));
+});
 
-/**
- * Sign in with Discord OAuth
- * Redirects user to Discord for authorization, then back to /dashboard
- */
-async function signInWithDiscord() {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'discord',
-        options: {
-            redirectTo: window.location.origin + '/dashboard',
-            scopes: 'identify email'
-        }
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+// ========== API Endpoints ==========
+
+// Health check (for UptimeRobot ping to prevent Render sleep)
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'NexaKS',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
     });
+});
 
-    if (error) {
-        console.error('Discord sign-in error:', error);
-        alert('Sign-in failed: ' + error.message);
+// Verify endpoint (for Lua loader â€” future implementation with Supabase)
+app.get('/api/verify', async (req, res) => {
+    const { license, hwid } = req.query;
+    if (!license || !hwid) {
+        return res.status(400).json({ error: 'Missing license or hwid' });
     }
-    return { data, error };
-}
+    // TODO: Query Supabase, check HWID binding, log the attempt
+    res.status(501).json({
+        error: 'Verify endpoint not implemented yet',
+        received: { license, hwid }
+    });
+});
 
-/**
- * Sign out current user, redirect to landing page
- */
-async function signOut() {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-        console.error('Sign-out error:', error);
-        return;
+// ========== 404 handler ==========
+app.use((req, res) => {
+    // For unknown routes, redirect to landing page
+    if (req.accepts('html')) {
+        return res.redirect('/');
     }
-    window.location.href = '/';
-}
+    res.status(404).json({ error: 'Not found' });
+});
 
-/**
- * Get current logged-in user, or null if not authenticated
- */
-async function getCurrentUser() {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) return null;
-    return user;
-}
-
-/**
- * Get user profile from `users` table (custom data)
- */
-async function getUserProfile(userId) {
-    const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-    if (error) {
-        console.error('Profile fetch error:', error);
-        return null;
-    }
-    return data;
-}
-
-/**
- * Redirect to login (index.html) if not authenticated
- * Use sa protected pages tulad ng dashboard.html at admin.html
- */
-async function requireAuth() {
-    const user = await getCurrentUser();
-    if (!user) {
-        window.location.href = '/';
-        return null;
-    }
-    return user;
-}
-
-/**
- * Redirect to dashboard if already logged in
- * Use sa index.html para hindi na lumabas ang landing kung logged in na
- */
-async function redirectIfAuthed() {
-    const user = await getCurrentUser();
-    if (user) {
-        window.location.href = '/dashboard';
-    }
-}
-
-// Expose helpers globally
-window.NexaKS = {
-    supabase,
-    signInWithDiscord,
-    signOut,
-    getCurrentUser,
-    getUserProfile,
-    requireAuth,
-    redirectIfAuthed
-};
+// ========== Start server ==========
+app.listen(PORT, () => {
+    console.log(`âš¡ NexaKS running on port ${PORT}`);
+});
