@@ -1,5 +1,5 @@
 /* ========================================
-   KeySystem — Dashboard JS
+   KeySystem â€” Dashboard JS
    ======================================== */
 
 // ========== Sidebar Toggle (mobile) ==========
@@ -40,7 +40,7 @@ function copyKey() {
     navigator.clipboard.writeText(key).then(() => {
         const btn = document.getElementById('copyText');
         const original = btn.textContent;
-        btn.textContent = '✓ Copied!';
+        btn.textContent = 'âœ“ Copied!';
         showToast('Key copied to clipboard', 'success');
         setTimeout(() => btn.textContent = original, 2000);
     }).catch(() => {
@@ -51,7 +51,7 @@ function copyKey() {
 function copyLoader() {
     const loader = document.getElementById('loaderScript').value;
     navigator.clipboard.writeText(loader).then(() => {
-        showToast('Loader script copied — paste into your executor', 'success');
+        showToast('Loader script copied â€” paste into your executor', 'success');
     }).catch(() => {
         showToast('Failed to copy loader', 'error');
     });
@@ -68,11 +68,11 @@ function closeResetModal() {
 
 function confirmReset() {
     closeResetModal();
-    showToast('🔄 HWID reset in progress...', 'info');
+    showToast('ðŸ”„ HWID reset in progress...', 'info');
 
-    // Simulate API call — replace with real Supabase call later
+    // Simulate API call â€” replace with real Supabase call later
     setTimeout(() => {
-        showToast('✓ HWID reset successful! Run the script to bind a new device.', 'success');
+        showToast('âœ“ HWID reset successful! Run the script to bind a new device.', 'success');
     }, 1500);
 }
 
@@ -114,13 +114,13 @@ function showToast(message, type = 'info') {
     toast.className = `toast ${type}`;
 
     const icons = {
-        success: '✓',
-        error: '✕',
-        info: 'ℹ'
+        success: 'âœ“',
+        error: 'âœ•',
+        info: 'â„¹'
     };
 
     toast.innerHTML = `
-        <span style="font-size:16px; font-weight:700;">${icons[type] || 'ℹ'}</span>
+        <span style="font-size:16px; font-weight:700;">${icons[type] || 'â„¹'}</span>
         <span>${message}</span>
     `;
 
@@ -132,7 +132,7 @@ function showToast(message, type = 'info') {
     }, 3500);
 }
 
-// ========== Load User Data (placeholder — connect to Supabase later) ==========
+// ========== Load User Data (placeholder â€” connect to Supabase later) ==========
 function loadUserData() {
     // TODO: Replace with real Supabase query
     // const { data: { user } } = await supabase.auth.getUser();
@@ -166,4 +166,4 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-console.log('%c⚡ KeySystem Dashboard', 'color:#7c3aed; font-size:18px; font-weight:800;');
+console.log('%câš¡ KeySystem Dashboard', 'color:#7c3aed; font-size:18px; font-weight:800;');
