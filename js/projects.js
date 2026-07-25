@@ -332,52 +332,117 @@ async function rollbackScript(projectId, scriptId, versionId) {
 }
 
 // ---------- Loader snippet ----------
+// ---------- Loader snippet ----------
 function showLoader(projectId, scriptId) {
     const p = projectsCache.find(x => x.id === projectId);
     const s = p?.scripts.find(x => x.id === scriptId);
-    if (!p || !s) return;
+
+    if (!p || !s) {
+        showToast('Project or script not found', 'error');
+        return;
+    }
+
     const origin = window.location.origin;
     const verifyBase = origin + '/api/verify';
     const statusBase = origin + '/api/status';
+
+    // These values are inserted as fixed URL components.
     const projectKey = encodeURIComponent(String(p.api_key));
     const scriptKey = encodeURIComponent(String(s.id));
+
     const loader =
 `-- NexForge authorized loader - ${p.name} / ${s.name}
-
 local license = "PASTE_KEY_HERE"
-local hwid = game:GetService(\"RbxAnalyticsService\"):GetClientId()
+local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
 
 local function encode(value)
-    return (tostring(value):gsub(\"([^%w%-_%.~])\", function(char)
-        return string.format(\"%%%02X\", string.byte(char))
+    return (tostring(value):gsub("([^%w%-_%.~])", function(char)
+        return string.format("%%%02X", string.byte(char))
     end))
 end
 
-local url = \"${verifyBase}?project=${projectKey}&script=${scriptKey}&license=\" .. encode(license) .. \"&hwid=\" .. encode(hwid)
+local url = "${verifyBase}?project=${projectKey}&script=${scriptKey}&license="
+    .. encode(license)
+    .. "&hwid="
+    .. encode(hwid)
+
 local requestOk, response = pcall(function()
     return game:HttpGet(url, true)
 end)
-if not requestOk then error(\"NexForge: Unable to reach the licensing service\") end
-if type(response) ~= \"string\" or response == \"\" then error(\"NexForge: Empty server response\") end
+
+if not requestOk then
+    error("NexForge: Unable to reach the licensing service")
+end
+
+if type(response) ~= "string" or response == "" then
+    error("NexForge: Empty server response")
+end
 
 local chunk, compileError = loadstring(response)
-if not chunk then error(\"NexForge: Invalid server response: \" .. tostring(compileError)) end
+
+if not chunk then
+    error("NexForge: Invalid server response: " .. tostring(compileError))
+end
+
 local runOk, runError = pcall(chunk)
-if not runOk then error(tostring(runError)) end`;
-    const statusUrl = statusBase + '?project=' + projectKey + '&script=' + scriptKey + '&license=PASTE_KEY_HERE&hwid=PASTE_HWID_HERE';
-    // reuse settings modal shell for a quick loader view
+
+if not runOk then
+    error(tostring(runError))
+end`;
+
+    const statusUrl =
+        statusBase +
+        '?project=' + projectKey +
+        '&script=' + scriptKey +
+        '&license=PASTE_KEY_HERE' +
+        '&hwid=PASTE_HWID_HERE';
+
     currentProject = p;
-    document.getElementById('setTitle').textContent = 'Loader - ' + s.name;
+
+    document.getElementById('setTitle').textContent =
+        'Loader - ' + s.name;
+
     document.getElementById('setTabs').style.display = 'none';
+
     document.getElementById('setContent').innerHTML = `
-        <p class=\"sub\">Use this only to load scripts for authorized users. Replace <strong>PASTE_KEY_HERE</strong> with the user's license key.</p>
-        <div class=\"code-block\">${escapeHtml(loader)}</div>
-        <button class=\"btn-sm\" style=\"margin-top:10px;\" onclick='copyText(${JSON.stringify(loader)})'>Copy loader</button>
-        <h3 style=\"color:#fff;margin:18px 0 8px;font-size:14px;\">Status endpoint (no source returned)</h3>
-        <div class=\"code-block\">${escapeHtml(statusUrl)}</div>
-        <button class=\"btn-sm\" style=\"margin-top:10px;\" onclick='copyText(${JSON.stringify(statusUrl)})'>Copy status URL</button>`;
+        <p class="sub">
+            Use this loader only for authorized users.
+            Replace <strong>PASTE_KEY_HERE</strong> with the user's license key.
+        </p>
+
+        <div class="code-block">${escapeHtml(loader)}</div>
+
+        <button
+            class="btn-sm"
+            style="margin-top:10px;"
+            id="copyLoaderBtn">
+            Copy loader
+        </button>
+
+        <h3 style="color:#fff;margin:18px 0 8px;font-size:14px;">
+            Status endpoint - no source returned
+        </h3>
+
+        <div class="code-block">${escapeHtml(statusUrl)}</div>
+
+        <button
+            class="btn-sm"
+            style="margin-top:10px;"
+            id="copyStatusUrlBtn">
+            Copy status URL
+        </button>
+    `;
+
+    // Avoid putting generated text inside inline onclick attributes.
+    document.getElementById('copyLoaderBtn')
+        ?.addEventListener('click', () => copyText(loader));
+
+    document.getElementById('copyStatusUrlBtn')
+        ?.addEventListener('click', () => copyText(statusUrl));
+
     document.getElementById('settingsModal').classList.add('show');
 }
+
 
 // ---------- Project settings modal (tabs) ----------
 async function openSettings(projectId) {
