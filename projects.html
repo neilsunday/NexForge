@@ -278,6 +278,23 @@
         </div>
     </div>
 
+    <!-- Script History Modal -->
+    <div class="modal-overlay" id="historyModal">
+        <div class="modal" style="max-width:720px;">
+            <div class="modal-title" id="historyTitle">Script History</div>
+            <div class="modal-desc">Every time you update a script, the previous version is snapshotted here. You can restore any past version - it becomes the live version immediately.</div>
+            <div class="table-wrapper" style="max-height:400px; overflow-y:auto;">
+                <table class="table">
+                    <thead><tr><th>Version</th><th>Saved</th><th>Size</th><th></th></tr></thead>
+                    <tbody id="historyBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast-container" id="toastContainer"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
