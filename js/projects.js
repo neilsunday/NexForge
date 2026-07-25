@@ -183,6 +183,7 @@ async function loadScripts() {
             <td>
                 <button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" onclick="showLoader('${s.id}')">Loader</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="openUpdateScript('${s.id}')">Update</button>
+                <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="openHistory('${s.id}')">History</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="togglePublish('${s.id}','${s.status}')">${s.status === 'published' ? 'Unpublish' : 'Publish'}</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="deleteScript('${s.id}')">Delete</button>
             </td>
@@ -264,6 +265,69 @@ async function confirmUpdateScript() {
     if (error) return showToast('Update failed: ' + error.message, 'error');
     closeUpdateModal();
     showToast('Script updated - clients get the new version on next execution', 'success');
+    await loadScripts();
+}
+
+// ---------- Script version history ----------
+let historyScriptId = null;
+let historyVersions = [];
+
+async function openHistory(scriptId) {
+    historyScriptId = scriptId;
+    const script = projScripts.find(x => x.id === scriptId);
+    document.getElementById('historyTitle').textContent = 'History: ' + (script?.name || 'Script');
+    document.getElementById('historyModal')?.classList.add('active');
+    await loadHistory();
+}
+function closeHistoryModal() {
+    document.getElementById('historyModal')?.classList.remove('active');
+    historyScriptId = null;
+    historyVersions = [];
+}
+
+async function loadHistory() {
+    const body = document.getElementById('historyBody');
+    if (body) body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">Loading...</td></tr>';
+
+    const { data, error } = await NexaKS.supabase.from('project_script_versions')
+        .select('*').eq('script_id', historyScriptId)
+        .order('saved_at', { ascending: false });
+    if (error) { console.error(error); if (body) body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">Failed to load history</td></tr>'; return; }
+
+    historyVersions = data || [];
+    if (historyVersions.length === 0) {
+        if (body) body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">No previous versions yet. Every update from now on will be saved here.</td></tr>';
+        return;
+    }
+    if (body) {
+        body.innerHTML = historyVersions.map(v => `
+            <tr>
+                <td>${escapeHtml(v.version || '-')}</td>
+                <td style="color:var(--text-muted);">${new Date(v.saved_at).toLocaleString()}</td>
+                <td>${v.script_content ? v.script_content.length : 0} chars</td>
+                <td>
+                    <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="restoreVersion('${v.id}')">Restore</button>
+                </td>
+            </tr>`).join('');
+    }
+}
+
+async function restoreVersion(versionId) {
+    const v = historyVersions.find(x => x.id === versionId);
+    if (!v) return;
+    if (!confirm('Restore version ' + (v.version || '(unversioned)') + '? The current script will be replaced. It will still be saved to history so you can roll forward again.')) return;
+
+    showToast('Restoring...', 'info');
+    const { error } = await NexaKS.supabase.from('project_scripts')
+        .update({
+            script_content: v.script_content,
+            version: v.version,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', historyScriptId);
+    if (error) return showToast('Restore failed: ' + error.message, 'error');
+    showToast('Restored - clients get this version on next execution', 'success');
+    closeHistoryModal();
     await loadScripts();
 }
 
@@ -447,4 +511,4 @@ function showToast(message, type) {
     }, 3500);
 }
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCreateModal(); closeDiscordModal(); closeUpdateModal(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCreateModal(); closeDiscordModal(); closeUpdateModal(); closeHistoryModal(); } });
