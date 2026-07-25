@@ -405,11 +405,19 @@ async function handleGetScript(interaction) {
         .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (!key) return interaction.editReply({ embeds: [embed('No Active License', 'You have no active license. Redeem one first.', 0xef4444)] });
 
-    const loader = '-- NexaKS Authentication Loader\n' +
-        'local license = "' + key.key + '"\n' +
-        'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()\n' +
-        'local response = game:HttpGet("' + SITE_URL + '/api/verify?license=" .. license .. "&hwid=" .. hwid)\n' +
-        'if response then loadstring(response)() end';
+    const loader = [
+        '-- NexaKS Authentication Loader',
+        'local license = "' + key.key + '"',
+        'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()',
+        'local url = "' + SITE_URL + '/api/verify?license=" .. license .. "&hwid=" .. hwid',
+        '',
+        'local ok, response = pcall(function() return game:HttpGet(url, true) end)',
+        'if not ok then warn("[NexaKS] Network error: " .. tostring(response)) return end',
+        'if not response or response == "" then warn("[NexaKS] Empty response from server") return end',
+        '',
+        'local success, err = pcall(function() loadstring(response)() end)',
+        'if not success then warn("[NexaKS] " .. tostring(err)) end'
+    ].join('\n');
 
     // Try DM
     try {
