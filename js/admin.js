@@ -248,7 +248,7 @@ async function revokeKeyById(key) {
 async function loadUsers() {
     try {
         const { data, error } = await NexaKS.supabase
-            .from('users').select('*').order('created_at', { ascending: false }).limit(100);
+            .from('users').select('*').order('created_at', { ascending: false }).limit(10);
 
         if (error) throw error;
         allUsers = data || [];
@@ -339,7 +339,7 @@ async function loadLogs() {
         if (error) throw error;
 
         const desc = document.getElementById('logsDesc');
-        if (desc) desc.textContent = 'Latest ' + (data?.length || 0) + ' events';
+        if (desc) desc.textContent = 'Showing ' + (data?.length || 0) + ' most recent events';
 
         const tbody = document.getElementById('logsTableBody');
         if (!tbody) return;
