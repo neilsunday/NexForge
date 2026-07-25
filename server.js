@@ -21,6 +21,9 @@ if (SUPABASE_SERVICE_KEY) {
     });
 }
 
+// Cloudflare Turnstile secret (used to verify tokens from the login modal)
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '0x4AAAAAAD9t05jnYUKselbqxd0Rz2QKun0';
+
 // ========== Middleware ==========
 // Security headers on every response
 app.use((req, res, next) => {
@@ -61,6 +64,24 @@ function rateLimit(req, res, next) {
     next();
 }
 
+// Separate stricter limiter for login (5 attempts per minute per IP)
+const loginBuckets = new Map();
+const LOGIN_LIMIT = 5;
+const LOGIN_WINDOW_MS = 60_000;
+
+function loginRateLimit(req, res, next) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const now = Date.now();
+    const bucket = loginBuckets.get(ip) || [];
+    const recent = bucket.filter(t => now - t < LOGIN_WINDOW_MS);
+    if (recent.length >= LOGIN_LIMIT) {
+        return res.status(429).json({ success: false, error: 'Too many login attempts. Try again in 1 minute.' });
+    }
+    recent.push(now);
+    loginBuckets.set(ip, recent);
+    next();
+}
+
 // ========== HTML Routes ==========
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
@@ -87,6 +108,48 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString(),
         uptime: process.uptime()
     });
+});
+
+// ========================================
+// /api/verify-turnstile - Cloudflare Turnstile token verification
+// Called by admin key login before revealing the key to the DB.
+// Returns { success: true } if the token is valid.
+// ========================================
+app.post('/api/verify-turnstile', loginRateLimit, async (req, res) => {
+    try {
+        const token = (req.body && req.body.token) ? String(req.body.token) : '';
+        if (!token) {
+            return res.status(400).json({ success: false, error: 'Missing captcha token' });
+        }
+        if (!TURNSTILE_SECRET_KEY) {
+            return res.status(500).json({ success: false, error: 'Captcha not configured on server' });
+        }
+
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+
+        const params = new URLSearchParams();
+        params.append('secret', TURNSTILE_SECRET_KEY);
+        params.append('response', token);
+        if (clientIp && clientIp !== 'unknown') params.append('remoteip', clientIp);
+
+        const cfRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+            method: 'POST',
+            body: params
+        });
+        const data = await cfRes.json();
+
+        if (data.success) {
+            return res.json({ success: true });
+        }
+        return res.status(400).json({
+            success: false,
+            error: 'Captcha verification failed',
+            codes: data['error-codes'] || []
+        });
+    } catch (err) {
+        console.error('Turnstile verify error:', err);
+        return res.status(500).json({ success: false, error: 'Server error verifying captcha' });
+    }
 });
 
 // ========================================
