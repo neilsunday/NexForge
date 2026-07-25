@@ -355,6 +355,26 @@ function copyLoaderCode() {
     navigator.clipboard.writeText(t.value).then(() => showToast('Loader copied', 'success')).catch(() => showToast('Failed to copy', 'error'));
 }
 
+// ---------- Discord command modal ----------
+function showDiscord() {
+    if (!activeProject) return;
+    const cmds = [
+        '// Post the panel in a Discord channel:',
+        '/setup-panel project:' + activeProject.slug,
+        '',
+        '// Generate keys tied to this project:',
+        '/generate plan:pro duration:30 quantity:1 project:' + activeProject.slug
+    ].join('\n');
+    document.getElementById('discordCode').value = cmds;
+    document.getElementById('discordModal')?.classList.add('active');
+}
+function closeDiscordModal() { document.getElementById('discordModal')?.classList.remove('active'); }
+function copyDiscordCode() {
+    const t = document.getElementById('discordCode');
+    if (!t) return;
+    navigator.clipboard.writeText(t.value).then(() => showToast('Commands copied', 'success')).catch(() => showToast('Failed to copy', 'error'));
+}
+
 // ---------- Utils ----------
 function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -383,4 +403,4 @@ function showToast(message, type) {
     }, 3500);
 }
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCreateModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCreateModal(); closeDiscordModal(); } });
