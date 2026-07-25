@@ -44,7 +44,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             loadKeys(),
             loadUsers(),
             loadLogs(),
-            loadScripts()
+            loadScripts(),
+            loadProjectsForForm()
         ]);
 
         if (loader) loader.style.display = 'none';
@@ -390,6 +391,7 @@ async function generateKeys() {
     const duration = document.getElementById('genDuration').value;
     const plan = document.getElementById('genPlan').value;
     const resets = parseInt(document.getElementById('genResets').value) || 5;
+    const projectId = document.getElementById('genProject')?.value || null;
 
     if (qty < 1 || qty > 500) return showToast('Quantity must be 1-500', 'error');
 
@@ -408,7 +410,8 @@ async function generateKeys() {
                 duration_days: duration === 'lifetime' ? null : parseInt(duration),
                 hwid_reset_limit: resets,
                 status: 'unclaimed',
-                created_by: currentUser.id
+                created_by: currentUser.id,
+                project_id: projectId || null
             });
         }
 
@@ -871,3 +874,19 @@ document.addEventListener('keydown', (e) => {
         closeBulkDeleteModal();
     }
 });
+
+// ========== Load projects into Generate Keys dropdown ==========
+async function loadProjectsForForm() {
+    try {
+        const { data, error } = await NexaKS.supabase
+            .from('projects').select('id, name, slug').order('name', { ascending: true });
+        if (error) throw error;
+        const select = document.getElementById('genProject');
+        if (!select) return;
+        const options = ['<option value="">-- None (unattached) --</option>']
+            .concat((data || []).map(p => '<option value="' + p.id + '">' + escapeHtml(p.name) + ' (' + p.slug + ')</option>'));
+        select.innerHTML = options.join('');
+    } catch (e) {
+        console.error('loadProjectsForForm:', e);
+    }
+}
