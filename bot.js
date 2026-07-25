@@ -87,7 +87,7 @@ const commands = [
         // ---- admin subcommands ----
         .addSubcommand(sc => sc.setName('create').setDescription('[Admin] Generate a key')
             .addStringOption(o => o.setName('plan').setDescription('Plan').setRequired(true)
-                .addChoices({name:'Free',value:'free'},{name:'Pro',value:'pro'},{name:'Enterprise',value:'enterprise'}))
+                .addChoices({name:'Free',value:'free'},{name:'Pro',value:'pro'},{name:'Enterprise',value:'enterprise'},{name:'Admin',value:'admin'}))
             .addStringOption(o => o.setName('duration').setDescription('Duration').setRequired(true)
                 .addChoices({name:'1 day',value:'1'},{name:'7 days',value:'7'},{name:'30 days',value:'30'},
                     {name:'90 days',value:'90'},{name:'1 year',value:'365'},{name:'Lifetime',value:'lifetime'}))
@@ -627,6 +627,11 @@ async function handleRedeem(interaction, key) {
 
     const { error } = await sb.from('keys').update(updates).eq('key', key);
     if (error) return interaction.editReply({ embeds: [embed('Error', 'Redeem failed: ' + error.message, 0xef4444)] });
+
+    // If it's an Admin plan key, promote the user to admin in the users table
+    if (existing.plan === 'admin') {
+        await sb.from('users').update({ is_admin: true }).eq('id', user.id);
+    }
 
     await sb.from('logs').insert({
         user_id: user.id, key: key,
