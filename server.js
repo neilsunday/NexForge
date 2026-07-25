@@ -914,12 +914,11 @@ async function fetchScriptForKey(key) {
         console.error('fetchScriptForKey:', err);
         return null;
     }
-    if (!sb) {
-        return res.status(500).type('text/plain').send(
-            'error("NexaKS: Server not configured - contact admin")'
-        );
-    }
+}
 
+/* Removed duplicated legacy /api/verify body. */
+
+/*
     const licenseUpper = license.trim().toUpperCase();
     const hwidClean = hwid.trim().substring(0, 128);
 
@@ -1110,23 +1109,7 @@ async function fetchScriptForKey(key) {
         );
     }
 });
-
-// ---- Helpers (existing) ----
-async function fetchScriptForKey(key) {
-    try {
-        const { data, error } = await sb.rpc('get_script_for_plan',
-            { user_plan: key.plan });
-        if (error || !data || data.length === 0) return null;
-        const script = data[0];
-        sb.from('scripts').update({
-            execution_count: (script.execution_count || 0) + 1
-        }).eq('id', script.id).then(() => {}, () => {});
-        return script.script_content;
-    } catch (err) {
-        console.error('fetchScriptForKey:', err);
-        return null;
-    }
-}
+*/
 
 function fallbackPayload(key) {
     return `-- NexaKS: No script configured yet
