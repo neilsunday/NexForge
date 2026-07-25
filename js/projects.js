@@ -4,6 +4,7 @@ let projUser = null;
 let projProfile = null;
 let projects = [];
 let activeProject = null;
+let projScripts = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
     const loader = document.getElementById('authLoader');
@@ -172,13 +173,15 @@ async function loadScripts() {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">No scripts yet</td></tr>';
         return;
     }
+    projScripts = data;
     tbody.innerHTML = data.map(s => `
         <tr>
-            <td>${escapeHtml(s.name)}</td>
+            <td>${escapeHtml(s.name)} ${s.keyless ? '<span class="badge badge-info" style="font-size:10px;">KEYLESS</span>' : ''}</td>
             <td><span class="badge badge-info">${s.plan}</span></td>
             <td>${escapeHtml(s.version || '-')}</td>
             <td><span class="badge ${s.status === 'published' ? 'badge-success' : 'badge-warning'}">${s.status}</span></td>
             <td>
+                <button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" onclick="showLoader('${s.id}')">Loader</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="togglePublish('${s.id}','${s.status}')">${s.status === 'published' ? 'Unpublish' : 'Publish'}</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="deleteScript('${s.id}')">Delete</button>
             </td>
@@ -191,8 +194,10 @@ async function addScript() {
     const content = document.getElementById('scriptContent')?.value;
     if (!content || !content.trim()) return showToast('Script content is empty', 'error');
 
+    const keyless = document.getElementById('scriptKeyless')?.checked || false;
+    const load_id = Math.random().toString(36).substring(2, 10);
     const { error } = await NexaKS.supabase.from('project_scripts').insert({
-        project_id: activeProject.id, name, plan, script_content: content
+        project_id: activeProject.id, name, plan, script_content: content, keyless, load_id
     });
     if (error) return showToast('Add script failed: ' + error.message, 'error');
     document.getElementById('scriptContent').value = '';
@@ -321,6 +326,33 @@ async function deleteProject() {
     showToast('Project deleted', 'success');
     backToList();
     await loadProjects();
+}
+
+// ---------- Loader modal ----------
+function showLoader(scriptId) {
+    const s = projScripts.find(x => x.id === scriptId);
+    if (!s) return;
+    if (s.status !== 'published') return showToast('Publish the script first to get its loader', 'error');
+
+    const site = window.location.origin;
+    const slug = activeProject.slug;
+    const loadParam = s.load_id ? ('?script=' + s.load_id) : '';
+    let code;
+    if (s.keyless) {
+        code = 'loadstring(game:HttpGet("' + site + '/api/load/' + slug + loadParam + '"))()';
+    } else {
+        const sep = loadParam ? '&' : '?';
+        code = '_G.script_key = "NXKS-XXXX-XXXX-XXXX-XXXX" -- replace with your key\n' +
+               'loadstring(game:HttpGet("' + site + '/api/load/' + slug + loadParam + sep + 'key=".._G.script_key))()';
+    }
+    document.getElementById('loaderCode').value = code;
+    document.getElementById('loaderModal')?.classList.add('active');
+}
+function closeLoaderModal() { document.getElementById('loaderModal')?.classList.remove('active'); }
+function copyLoaderCode() {
+    const t = document.getElementById('loaderCode');
+    if (!t) return;
+    navigator.clipboard.writeText(t.value).then(() => showToast('Loader copied', 'success')).catch(() => showToast('Failed to copy', 'error'));
 }
 
 // ---------- Utils ----------
