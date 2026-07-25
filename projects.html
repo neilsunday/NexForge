@@ -258,6 +258,26 @@
         </div>
     </div>
 
+    <!-- Update Script Modal (blind replace - never shows old content) -->
+    <div class="modal-overlay" id="updateModal">
+        <div class="modal" style="max-width:640px;">
+            <div class="modal-title" id="updateScriptTitle">Update Script</div>
+            <div class="modal-desc">Paste the new Lua content below. The previous version is replaced on save - clients get the new version on next execution automatically. You will not see the old content here.</div>
+            <div class="form-group">
+                <label class="form-label">Version</label>
+                <input type="text" class="form-input" id="updateScriptVersion" placeholder="1.0.1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">New Lua Content</label>
+                <textarea class="form-textarea" id="updateScriptContent" placeholder="print('Updated script')" style="min-height:160px; font-size:12px; font-family:'JetBrains Mono',monospace;"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeUpdateModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmUpdateScript()">Save New Version</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast-container" id="toastContainer"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
