@@ -1,489 +1,377 @@
-/* NexaKS - Dashboard JS (Phase 4 compatibility fix) */
+/* NexaKS - Dashboard JS (with fixed Lua loader) */
+
 let currentUser = null;
 let currentProfile = null;
 let currentKey = null;
 
-async function apiFetch(path, opts = {}) {
-  const session = await NexaKS.supabase.auth.getSession();
-  const token = session?.data?.session?.access_token;
-  if (!token) throw new Error("Not signed in");
+document.addEventListener('DOMContentLoaded', async () => {
+    const loader = document.getElementById('authLoader');
+    const main = document.getElementById('dashboardMain');
 
-  const response = await fetch(path, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + token,
-      ...(opts.headers || {}),
-    },
-  });
-
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(body.error || body.message || response.statusText);
-  return body;
-}
-
-document.addEventListener("DOMContentLoaded", async () => {
-  const loader = document.getElementById("authLoader");
-  const main = document.getElementById("dashboardMain");
-  const forceShow = setTimeout(() => {
-    if (loader) loader.style.display = "none";
-    if (main) main.style.display = "grid";
-  }, 6000);
-
-  try {
-    currentUser = await NexaKS.getCurrentUser();
-    if (!currentUser) {
-      if (sessionStorage.getItem("nexaks_redirected")) {
-        sessionStorage.removeItem("nexaks_redirected");
-        clearTimeout(forceShow);
-        if (loader) {
-          loader.innerHTML =
-            '<div style="text-align:center;color:white;padding:40px;"><h2>Not signed in</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">go back</a> and sign in with Discord.</p></div>';
-        }
-        return;
-      }
-      sessionStorage.setItem("nexaks_redirected", "1");
-      window.location.href = "/";
-      return;
-    }
-    sessionStorage.removeItem("nexaks_redirected");
+    const forceShow = setTimeout(() => {
+        if (loader) loader.style.display = 'none';
+        if (main) main.style.display = 'grid';
+    }, 6000);
 
     try {
-      const { profile } = await apiFetch("/api/me");
-      currentProfile = profile;
-    } catch (error) {
-      console.error("Profile:", error);
-    }
+        currentUser = await NexaKS.getCurrentUser();
 
-    if (!currentProfile) {
-      const meta = currentUser.user_metadata || {};
-      currentProfile = {
-        id: currentUser.id,
-        username: meta.full_name || meta.name || meta.user_name || "User",
-        avatar_url: meta.avatar_url || null,
-        is_admin: false,
-      };
-    }
+        if (!currentUser) {
+            if (sessionStorage.getItem('nexaks_redirected')) {
+                sessionStorage.removeItem('nexaks_redirected');
+                clearTimeout(forceShow);
+                if (loader) loader.innerHTML = '<div style="text-align:center;color:white;padding:40px;"><h2>Not signed in</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">go back</a> and sign in with Discord.</p></div>';
+                return;
+            }
+            sessionStorage.setItem('nexaks_redirected', '1');
+            window.location.href = '/';
+            return;
+        }
 
-    await loadUserKey();
-    await loadActivity();
-    renderUserInfo();
-  } catch (error) {
-    console.error("Dashboard init:", error);
-    showToast(error.message || "Failed to load dashboard", "error");
-  } finally {
-    clearTimeout(forceShow);
-    if (loader) loader.style.display = "none";
-    if (main) main.style.display = "grid";
-  }
+        sessionStorage.removeItem('nexaks_redirected');
+
+        currentProfile = await NexaKS.getUserProfile(currentUser.id);
+        if (!currentProfile) {
+            const meta = currentUser.user_metadata || {};
+            try {
+                const { data } = await NexaKS.supabase.from('users').insert({
+                    id: currentUser.id,
+                    discord_id: meta.provider_id || meta.sub || null,
+                    username: meta.full_name || meta.name || meta.user_name || 'User',
+                    avatar_url: meta.avatar_url || null
+                }).select().maybeSingle();
+                currentProfile = data;
+            } catch (e) { console.error('Manual profile insert:', e); }
+            if (!currentProfile) {
+                currentProfile = {
+                    id: currentUser.id,
+                    username: meta.full_name || meta.name || meta.user_name || 'User',
+                    avatar_url: meta.avatar_url || null,
+                    is_admin: false
+                };
+            }
+        }
+
+        try { await loadUserKey(); } catch (e) { console.error('loadUserKey:', e); }
+        try { await loadActivity(); } catch (e) { console.error('loadActivity:', e); }
+
+        renderUserInfo();
+    } catch (err) {
+        console.error('Dashboard init:', err);
+    } finally {
+        clearTimeout(forceShow);
+        if (loader) loader.style.display = 'none';
+        if (main) main.style.display = 'grid';
+
+        document.querySelectorAll('.card, .stat-card').forEach((el, i) => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(10px)';
+            el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+            setTimeout(() => {
+                el.style.opacity = '1';
+                el.style.transform = 'translateY(0)';
+            }, i * 60);
+        });
+    }
 });
 
 function renderUserInfo() {
-  if (!currentUser) return;
+    if (!currentUser) return;
+    const meta = currentUser.user_metadata || {};
+    const username = currentProfile?.username || meta.full_name || meta.name || meta.user_name || 'User';
+    const avatarUrl = currentProfile?.avatar_url || meta.avatar_url;
 
-  const meta = currentUser.user_metadata || {};
-  const username =
-    currentProfile?.username ||
-    meta.full_name ||
-    meta.name ||
-    meta.user_name ||
-    "User";
-  const avatarUrl = currentProfile?.avatar_url || meta.avatar_url;
-  const get = (id) => document.getElementById(id);
+    const $ = (id) => document.getElementById(id);
+    if ($('userName')) $('userName').textContent = username;
+    if ($('userNameSmall')) $('userNameSmall').textContent = username;
 
-  if (get("userName")) get("userName").textContent = username;
-  if (get("userNameSmall")) get("userNameSmall").textContent = username;
+    if (avatarUrl && $('userAvatarImg')) {
+        $('userAvatarImg').src = avatarUrl;
+        $('userAvatarImg').style.display = 'block';
+        if ($('userAvatar')) $('userAvatar').style.display = 'none';
+    } else if ($('userAvatar')) {
+        $('userAvatar').textContent = username.charAt(0).toUpperCase();
+    }
 
-  if (avatarUrl && get("userAvatarImg")) {
-    get("userAvatarImg").src = avatarUrl;
-    get("userAvatarImg").style.display = "block";
-    if (get("userAvatar")) get("userAvatar").style.display = "none";
-  } else if (get("userAvatar")) {
-    get("userAvatar").textContent = username.charAt(0).toUpperCase();
-  }
+    if (currentProfile?.is_admin && $('adminLink')) {
+        $('adminLink').style.display = 'flex';
+        $('adminLink').href = 'admin.html';
+    }
 
-  if (currentProfile?.is_admin && get("adminLink")) {
-    get("adminLink").style.display = "flex";
-    get("adminLink").href = "admin.html";
-  }
-
-  const plan = currentKey?.plan || "free";
-  if (get("userRole")) {
-    get("userRole").textContent =
-      plan.charAt(0).toUpperCase() + plan.slice(1) + " Plan";
-  }
+    const plan = currentKey?.plan || 'free';
+    if ($('userRole')) $('userRole').textContent = plan.charAt(0).toUpperCase() + plan.slice(1) + ' Plan';
 }
 
 async function loadUserKey() {
-  const noKey = document.getElementById("noKeyState");
-  const active = document.getElementById("activeKeyState");
+    const { data, error } = await NexaKS.supabase
+        .from('keys').select('*')
+        .eq('user_id', currentUser.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle();
 
-  try {
-    const { key } = await apiFetch("/api/me/key");
-    currentKey = key || null;
-  } catch (error) {
-    console.error("Load key:", error);
-    currentKey = null;
-    showToast("Unable to load license: " + error.message, "error");
-  }
+    if (error) { console.error('Load key:', error); return; }
 
-  if (!currentKey) {
-    if (noKey) noKey.style.display = "block";
-    if (active) active.style.display = "none";
-    renderUserInfo();
-    return;
-  }
+    const noKey = document.getElementById('noKeyState');
+    const active = document.getElementById('activeKeyState');
 
-  if (noKey) noKey.style.display = "none";
-  if (active) active.style.display = "block";
-  renderKey();
-  renderUserInfo();
+    if (!data) {
+        if (noKey) noKey.style.display = 'block';
+        if (active) active.style.display = 'none';
+        return;
+    }
+
+    currentKey = data;
+    if (noKey) noKey.style.display = 'none';
+    if (active) active.style.display = 'block';
+    renderKey();
 }
 
 function renderKey() {
-  if (!currentKey) return;
+    if (!currentKey) return;
+    const $ = (id) => document.getElementById(id);
 
-  const get = (id) => document.getElementById(id);
-  const status = String(currentKey.status || "active").toLowerCase();
-  const plan = String(currentKey.plan || "free");
-  const executionCount = Math.max(0, Number(currentKey.execution_count || 0));
-  const resetCount = Math.max(0, Number(currentKey.hwid_reset_count || 0));
-  const resetLimit = Math.max(0, Number(currentKey.hwid_reset_limit ?? 5));
+    if ($('keyValue')) $('keyValue').textContent = currentKey.key;
 
-  if (get("keyValue")) get("keyValue").textContent = currentKey.key || "";
-  if (get("hwidValue")) {
     const hwid = currentKey.hwid;
-    get("hwidValue").textContent = hwid
-      ? hwid.substring(0, 8) +
-        "..." +
-        hwid.substring(Math.max(8, hwid.length - 4))
-      : "Not bound yet";
-  }
-
-  if (get("activatedDate")) {
-    get("activatedDate").textContent = currentKey.created_at
-      ? new Date(currentKey.created_at).toLocaleDateString()
-      : "-";
-  }
-
-  const expiresAt = currentKey.expires_at
-    ? new Date(currentKey.expires_at)
-    : null;
-  const validExpiry = expiresAt && !Number.isNaN(expiresAt.getTime());
-  const expiryText = validExpiry ? expiresAt.toLocaleDateString() : "Never";
-  if (get("expiresDate")) get("expiresDate").textContent = expiryText;
-  if (get("expiresValue")) get("expiresValue").textContent = expiryText;
-
-  if (get("expiresIn")) {
-    if (!validExpiry) {
-      get("expiresIn").textContent = "Lifetime";
-    } else {
-      const days = Math.max(
-        0,
-        Math.ceil((expiresAt.getTime() - Date.now()) / 86400000),
-      );
-      get("expiresIn").textContent = days + (days === 1 ? " day" : " days");
+    if ($('hwidValue')) {
+        $('hwidValue').textContent = hwid
+            ? hwid.substring(0, 8) + '...' + hwid.substring(hwid.length - 4)
+            : 'Not bound yet';
     }
-  }
 
-  if (get("execCount")) get("execCount").textContent = String(executionCount);
-  if (get("hwidResets"))
-    get("hwidResets").textContent = resetCount + "/" + resetLimit;
-  if (get("hwidResetsSub")) {
-    get("hwidResetsSub").textContent =
-      resetCount >= resetLimit ? "Limit reached" : "Available";
-  }
+    if ($('activatedDate')) {
+        $('activatedDate').textContent = currentKey.created_at
+            ? new Date(currentKey.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : '-';
+    }
 
-  if (get("statusBadge")) {
-    get("statusBadge").textContent =
-      status.charAt(0).toUpperCase() + status.slice(1);
-    get("statusBadge").className =
-      "badge " + (status === "active" ? "badge-success" : "badge-danger");
-  }
-  if (get("statusSub")) {
-    get("statusSub").textContent = currentKey.hwid
-      ? "Hardware bound"
-      : "Waiting for first execution";
-  }
+    if (currentKey.expires_at) {
+        const expires = new Date(currentKey.expires_at);
+        const daysLeft = Math.max(0, Math.ceil((expires - new Date()) / 86400000));
+        if ($('expiresIn')) $('expiresIn').innerHTML = daysLeft + '<span style="font-size:14px;color:var(--text-muted);"> days</span>';
+        if ($('expiresDate')) $('expiresDate').textContent = 'Renews ' + expires.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        if ($('expiresValue')) $('expiresValue').textContent = expires.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } else {
+        if ($('expiresIn')) $('expiresIn').textContent = 'Lifetime';
+        if ($('expiresDate')) $('expiresDate').textContent = 'Never expires';
+        if ($('expiresValue')) $('expiresValue').textContent = 'Lifetime';
+    }
 
-  if (get("planBadge")) {
-    get("planBadge").textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
-    get("planBadge").className =
-      "badge " +
-      (plan === "enterprise"
-        ? "badge-warning"
-        : plan === "pro"
-          ? "badge-info"
-          : "badge-success");
-  }
+    const used = currentKey.hwid_reset_count || 0;
+    const limit = currentKey.hwid_reset_limit || 5;
+    if ($('hwidResets')) $('hwidResets').innerHTML = used + '<span style="font-size:14px;color:var(--text-muted);">/' + limit + '</span>';
+    if ($('hwidResetsSub')) $('hwidResetsSub').textContent = Math.max(0, limit - used) + ' resets remaining';
+    if ($('execCount')) $('execCount').textContent = currentKey.execution_count || 0;
 
-  renderDashboardLoader();
-}
+    const plan = currentKey.plan || 'free';
+    const badge = $('planBadge');
+    if (badge) {
+        badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
+        badge.className = 'badge ' + (plan === 'enterprise' ? 'badge-warning' : plan === 'pro' ? 'badge-info' : 'badge');
+    }
 
-function renderDashboardLoader() {
-  const field = document.getElementById("loaderScript");
-  if (!field || !currentKey) return;
-
-  field.value = [
-    "-- NexForge license loader",
-    "-- Use Projects > Script > Loader for deterministic project/script routing.",
-    'local license = "' +
-      String(currentKey.key || "")
-        .replace(/\\/g, "\\\\")
-        .replace(/"/g, '\\"') +
-      '"',
-    'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()',
-    "",
-    "local function encode(value)",
-    '    return (tostring(value):gsub("([^%w%-_%.~])", function(char)',
-    '        return string.format("%%%02X", string.byte(char))',
-    "    end))",
-    "end",
-    "",
-    'local url = "' +
-      window.location.origin +
-      '/api/verify?license=" .. encode(license) .. "&hwid=" .. encode(hwid)',
-    "local requestOk, response = pcall(function()",
-    "    return game:HttpGet(url, true)",
-    "end)",
-    'if not requestOk then error("NexForge: Unable to reach the licensing service") end',
-    'if type(response) ~= "string" or response == "" then error("NexForge: Empty server response") end',
-    "local chunk, compileError = loadstring(response)",
-    'if not chunk then error("NexForge: Invalid server response: " .. tostring(compileError)) end',
-    "local runOk, runError = pcall(chunk)",
-    "if not runOk then error(tostring(runError)) end",
-  ].join("\n");
+    // FIXED LOADER - with proper pcall error handling for Roblox
+    const loaderLines = [
+        '-- NexaKS Authentication Loader',
+        'local license = "' + currentKey.key + '"',
+        'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()',
+        'local url = "' + window.location.origin + '/api/verify?license=" .. license .. "&hwid=" .. hwid',
+        '',
+        'local ok, response = pcall(function() return game:HttpGet(url, true) end)',
+        'if not ok then warn("[NexaKS] Network error: " .. tostring(response)) return end',
+        'if not response or response == "" then warn("[NexaKS] Empty response from server") return end',
+        '',
+        'local success, err = pcall(function() loadstring(response)() end)',
+        'if not success then warn("[NexaKS] " .. tostring(err)) end'
+    ];
+    if ($('loaderScript')) $('loaderScript').value = loaderLines.join('\n');
 }
 
 async function loadActivity() {
-  const tbody = document.getElementById("activityTableBody");
-  if (!tbody) return;
+    const { data, error } = await NexaKS.supabase
+        .from('logs').select('*')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false }).limit(10);
 
-  try {
-    const { logs } = await apiFetch("/api/me/activity");
-    const items = logs || [];
+    if (error) { console.error('Load activity:', error); return; }
 
-    if (!items.length) {
-      tbody.innerHTML =
-        '<tr><td colspan="3" style="text-align:center;color:#6b7280;padding:32px;">No activity yet</td></tr>';
-      return;
+    const tbody = document.getElementById('activityTableBody');
+    if (!tbody) return;
+
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:32px;">No activity yet</td></tr>';
+        return;
     }
 
-    tbody.innerHTML = items
-      .map((log) => {
-        const message =
-          log.metadata?.message || log.details || log.action || "";
-        const createdAt = log.created_at
-          ? new Date(log.created_at).toLocaleString()
-          : "";
-        return (
-          "<tr>" +
-          "<td>" +
-          escapeHtml(log.action || "") +
-          "</td>" +
-          "<td>" +
-          escapeHtml(message) +
-          "</td>" +
-          "<td>" +
-          escapeHtml(createdAt) +
-          "</td>" +
-          "</tr>"
-        );
-      })
-      .join("");
-  } catch (error) {
-    console.error("Load activity:", error);
-    tbody.innerHTML =
-      '<tr><td colspan="3" style="text-align:center;color:#ef4444;padding:32px;">Unable to load activity</td></tr>';
-  }
+    tbody.innerHTML = data.map(log => {
+        const time = timeAgo(new Date(log.created_at));
+        const cls = log.status === 'success' ? 'badge-success' : log.status === 'failed' ? 'badge-danger' : log.status === 'warning' ? 'badge-warning' : 'badge-info';
+        return '<tr><td><span class="badge ' + cls + '">' + log.action + '</span></td><td>' + (log.metadata?.message || '-') + '</td><td style="color:var(--text-muted);">' + time + '</td></tr>';
+    }).join('');
 }
 
-async function resetHwid() {
-  try {
-    await apiFetch("/api/me/reset-hwid", { method: "POST" });
-    showToast("Hardware ID reset", "success");
-    closeResetModal();
-    await loadUserKey();
-    await loadActivity();
-  } catch (error) {
-    showToast(error.message, "error");
-  }
-}
-
-async function confirmReset() {
-  await resetHwid();
-}
-
-async function confirmRedeem() {
-  const input = document.getElementById("redeemInput");
-  const button = document.getElementById("redeemConfirmBtn");
-  const key = String(input?.value || "")
-    .trim()
-    .toUpperCase();
-
-  if (!key) {
-    showToast("Enter a license key", "error");
-    input?.focus();
-    return;
-  }
-  if (!/^NXKS-[A-Z0-9-]{4,64}$/.test(key)) {
-    showToast("Invalid license key format", "error");
-    input?.focus();
-    return;
-  }
-
-  if (button) button.disabled = true;
-  try {
-    await apiFetch("/api/me/redeem", {
-      method: "POST",
-      body: JSON.stringify({ key }),
-    });
-    if (input) input.value = "";
-    showToast("License key redeemed", "success");
-    closeRedeemModal();
-    await loadUserKey();
-    await loadActivity();
-  } catch (error) {
-    showToast(error.message, "error");
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-function openResetModal() {
-  const modal = document.getElementById("resetModal");
-  modal?.classList.add("active");
-  modal?.setAttribute("aria-hidden", "false");
-}
-
-function closeResetModal() {
-  const modal = document.getElementById("resetModal");
-  modal?.classList.remove("active");
-  modal?.setAttribute("aria-hidden", "true");
-}
-
-function openRedeemModal() {
-  const modal = document.getElementById("redeemModal");
-  modal?.classList.add("active");
-  modal?.setAttribute("aria-hidden", "false");
-  setTimeout(() => document.getElementById("redeemInput")?.focus(), 0);
-}
-
-function closeRedeemModal() {
-  const modal = document.getElementById("redeemModal");
-  modal?.classList.remove("active");
-  modal?.setAttribute("aria-hidden", "true");
-}
-
-function showSection(section) {
-  const target = document.getElementById("section-" + section);
-  if (!target) {
-    showToast("Section is available after redeeming a license", "info");
-    return;
-  }
-  target.scrollIntoView({ behavior: "smooth", block: "start" });
-  target.style.boxShadow = "0 0 0 2px var(--accent)";
-  setTimeout(() => {
-    target.style.boxShadow = "";
-  }, 1200);
-  document.getElementById("sidebar")?.classList.remove("open");
+function timeAgo(date) {
+    const s = Math.floor((new Date() - date) / 1000);
+    if (s < 60) return 'Just now';
+    if (s < 3600) return Math.floor(s / 60) + ' mins ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' hours ago';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function toggleSidebar() {
-  document.getElementById("sidebar")?.classList.toggle("open");
+    const s = document.getElementById('sidebar');
+    if (s) s.classList.toggle('open');
+}
+
+document.addEventListener('click', (e) => {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.querySelector('.sidebar-toggle');
+    if (window.innerWidth <= 968 && sidebar?.classList.contains('open') &&
+        !sidebar.contains(e.target) && !toggle?.contains(e.target)) {
+        sidebar.classList.remove('open');
+    }
+});
+
+function showSection(section) {
+    const target = document.getElementById('section-' + section);
+    if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.style.transition = 'box-shadow 0.3s';
+        target.style.boxShadow = '0 0 0 2px var(--accent)';
+        setTimeout(() => target.style.boxShadow = '', 1500);
+    }
+    document.getElementById('sidebar')?.classList.remove('open');
 }
 
 function copyKey() {
-  if (!currentKey?.key) return;
-  copyToClipboard(currentKey.key, "Key copied");
+    if (!currentKey) return;
+    navigator.clipboard.writeText(currentKey.key).then(() => {
+        const btn = document.getElementById('copyText');
+        if (btn) {
+            const original = btn.textContent;
+            btn.textContent = 'Copied';
+            setTimeout(() => btn.textContent = original, 2000);
+        }
+        showToast('License key copied', 'success');
+    }).catch(() => showToast('Failed to copy', 'error'));
 }
 
 function copyLoader() {
-  const code = document.getElementById("loaderScript")?.value || "";
-  if (!code) return showToast("No loader available", "error");
-  copyToClipboard(code, "Loader copied");
+    const t = document.getElementById('loaderScript');
+    if (!t) return;
+    navigator.clipboard.writeText(t.value).then(() => showToast('Loader copied', 'success')).catch(() => showToast('Failed to copy', 'error'));
 }
 
-async function copyToClipboard(text, successMessage) {
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast(successMessage, "success");
-  } catch (error) {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.select();
-    const copied = document.execCommand("copy");
-    textarea.remove();
-    showToast(
-      copied ? successMessage : "Copy failed",
-      copied ? "success" : "error",
-    );
-  }
+function openResetModal() {
+    if (!currentKey) return showToast('No active license', 'error');
+    document.getElementById('resetModal')?.classList.add('active');
+}
+function closeResetModal() { document.getElementById('resetModal')?.classList.remove('active'); }
+
+async function confirmReset() {
+    closeResetModal();
+    showToast('Resetting hardware ID...', 'info');
+
+    if (currentKey.last_hwid_reset) {
+        const hrs = (new Date() - new Date(currentKey.last_hwid_reset)) / 3600000;
+        if (hrs < 24) return showToast('Cooldown active. Try again in ' + Math.ceil(24 - hrs) + 'h', 'error');
+    }
+    if ((currentKey.hwid_reset_count || 0) >= (currentKey.hwid_reset_limit || 5)) {
+        return showToast('Reset limit reached', 'error');
+    }
+
+    const { error } = await NexaKS.supabase.from('keys').update({
+        hwid: null,
+        hwid_reset_count: (currentKey.hwid_reset_count || 0) + 1,
+        last_hwid_reset: new Date().toISOString()
+    }).eq('key', currentKey.key);
+
+    if (error) return showToast('Reset failed: ' + error.message, 'error');
+
+    await NexaKS.supabase.from('logs').insert({
+        user_id: currentUser.id, key: currentKey.key,
+        action: 'reset_hwid', status: 'success',
+        metadata: { message: 'HWID reset via dashboard' }
+    });
+
+    showToast('Hardware ID reset', 'success');
+    await loadUserKey();
+    await loadActivity();
+}
+
+function openRedeemModal() {
+    document.getElementById('redeemModal')?.classList.add('active');
+    setTimeout(() => document.getElementById('redeemInput')?.focus(), 100);
+}
+function closeRedeemModal() {
+    document.getElementById('redeemModal')?.classList.remove('active');
+    const i = document.getElementById('redeemInput');
+    if (i) i.value = '';
+}
+
+async function confirmRedeem() {
+    const input = document.getElementById('redeemInput');
+    if (!input) return;
+    const key = input.value.trim().toUpperCase();
+    if (!key) return showToast('Enter a license key', 'error');
+    if (!key.startsWith('NXKS-')) return showToast('Invalid key format', 'error');
+
+    closeRedeemModal();
+    showToast('Redeeming...', 'info');
+
+    const { data: existing } = await NexaKS.supabase.from('keys').select('*').eq('key', key).maybeSingle();
+    if (!existing) return showToast('Key not found', 'error');
+    if (existing.user_id && existing.user_id !== currentUser.id) return showToast('Key already claimed', 'error');
+    if (existing.status === 'revoked') return showToast('Key revoked', 'error');
+
+    const updates = { user_id: currentUser.id, status: 'active' };
+    if (existing.duration_days && !existing.expires_at) {
+        const exp = new Date();
+        exp.setDate(exp.getDate() + existing.duration_days);
+        updates.expires_at = exp.toISOString();
+    }
+
+    const { error } = await NexaKS.supabase.from('keys').update(updates).eq('key', key);
+    if (error) return showToast('Redeem failed: ' + error.message, 'error');
+
+    await NexaKS.supabase.from('logs').insert({
+        user_id: currentUser.id, key: key,
+        action: 'redeem', status: 'success',
+        metadata: { message: 'Redeemed via dashboard' }
+    });
+
+    showToast('License activated', 'success');
+    await loadUserKey();
+    await loadActivity();
+    renderUserInfo();
 }
 
 async function handleLogout() {
-  if (!confirm("Sign out from NexaKS?")) return;
-  await NexaKS.signOut();
+    if (!confirm('Sign out from NexaKS?')) return;
+    await NexaKS.signOut();
 }
 
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    closeResetModal();
-    closeRedeemModal();
-  }
-  if (
-    event.key === "Enter" &&
-    document.getElementById("redeemModal")?.classList.contains("active")
-  ) {
-    confirmRedeem();
-  }
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeResetModal(); closeRedeemModal(); }
+});
+document.getElementById('resetModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'resetModal') closeResetModal();
+});
+document.getElementById('redeemModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'redeemModal') closeRedeemModal();
 });
 
-document.addEventListener("click", (event) => {
-  const resetModal = document.getElementById("resetModal");
-  const redeemModal = document.getElementById("redeemModal");
-  if (event.target === resetModal) closeResetModal();
-  if (event.target === redeemModal) closeRedeemModal();
-
-  const sidebar = document.getElementById("sidebar");
-  const toggle = document.querySelector(".sidebar-toggle");
-  if (
-    window.innerWidth <= 968 &&
-    sidebar?.classList.contains("open") &&
-    !sidebar.contains(event.target) &&
-    !toggle?.contains(event.target)
-  ) {
-    sidebar.classList.remove("open");
-  }
-});
-
-function escapeHtml(value) {
-  if (value == null) return "";
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function showToast(message, type = "info") {
-  const container = document.getElementById("toastContainer");
-  if (!container) return;
-
-  const toast = document.createElement("div");
-  toast.className = "toast " + type;
-  const text = document.createElement("span");
-  text.textContent = String(message || "");
-  toast.appendChild(text);
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.animation = "slideIn 0.3s ease reverse";
-    setTimeout(() => toast.remove(), 300);
-  }, 3500);
+function showToast(message, type) {
+    type = type || 'info';
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.innerHTML = '<span>' + message + '</span>';
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
 }
