@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Help & Documentation â€” NexaKS</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        .help-toc { position: sticky; top: 20px; }
+        .help-toc a { display: block; padding: 6px 12px; color: var(--text-secondary); text-decoration: none; border-left: 2px solid transparent; font-size: 13px; }
+        .help-toc a:hover { color: var(--text-primary); border-left-color: var(--accent); }
+        .help-toc a.active { color: var(--accent-hover); border-left-color: var(--accent); background: rgba(124,58,237,0.05); }
+        .help-section { scroll-margin-top: 20px; margin-bottom: 40px; }
+        .help-section h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
+        .help-section h3 { font-size: 16px; font-weight: 600; margin: 24px 0 8px; color: var(--text-primary); }
+        .help-section p { color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px; }
+        .help-section ul, .help-section ol { color: var(--text-secondary); line-height: 1.7; padding-left: 20px; margin-bottom: 12px; }
+        .help-section li { margin-bottom: 6px; }
+        .help-section code { background: rgba(124,58,237,0.1); color: var(--accent-hover); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+        .help-section pre { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-x: auto; color: var(--text-primary); margin-bottom: 12px; }
+        .cmd-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        .cmd-table td:first-child { white-space: nowrap; }
+        .callout { background: rgba(124,58,237,0.08); border-left: 3px solid var(--accent); padding: 12px 16px; border-radius: 6px; margin: 12px 0; }
+        .callout.warn { background: rgba(245,158,11,0.08); border-left-color: #f59e0b; }
+        .callout.danger { background: rgba(239,68,68,0.08); border-left-color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+
+    <div id="authLoader" style="position:fixed; inset:0; background:var(--bg-primary); display:flex; align-items:center; justify-content:center; z-index:9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <div class="dashboard-layout" style="display:none;" id="helpMain">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <a href="index.html" class="logo">
+                    <svg class="logo-mark" width="24" height="24" viewBox="0 0 32 32" fill="none">
+                        <path d="M16 2L4 9v14l12 7 12-7V9L16 2z" stroke="url(#logoGrad)" stroke-width="2" stroke-linejoin="round"/>
+                        <path d="M16 10v12M11 13l5-3 5 3M11 19l5 3 5-3" stroke="url(#logoGrad)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <defs>
+                            <linearGradient id="logoGrad" x1="4" y1="2" x2="28" y2="30">
+                                <stop offset="0%" stop-color="#7c3aed"/>
+                                <stop offset="100%" stop-color="#ec4899"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <span class="logo-text">NexaKS</span>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-section-title">Main</div>
+                <a href="dashboard.html">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12l9-9 9 9M5 10v10h4v-6h6v6h4V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Dashboard
+                </a>
+                <a href="projects.html">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 7h7l2 2h9v10a1 1 0 01-1 1H4a1 1 0 01-1-1V7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    Projects
+                </a>
+
+                <div class="sidebar-section-title">Support</div>
+                <a href="help.html" class="active">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 4h16v14H5.5L4 20V4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    Documentation
+                </a>
+                <a href="#" id="adminLink" style="display:none;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    Admin Panel
+                </a>
+
+                <div class="sidebar-section-title">Account</div>
+                <a href="#" onclick="handleLogout(); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Sign Out
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main content -->
+        <main class="main-content">
+            <div class="page-header">
+                <div style="display:flex; align-items:center; gap:16px;">
+                    <button class="sidebar-toggle" onclick="toggleSidebar()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </button>
+                    <div>
+                        <h1 class="page-title">Help & <span class="gradient-text">Documentation</span></h1>
+                        <p class="page-subtitle">Everything you need to use NexaKS â€” Discord bot, dashboard, and loaders</p>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: 220px 1fr; gap:24px; align-items:start;">
+                <!-- Table of contents -->
+                <aside class="card help-toc" style="padding:16px;">
+                    <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:600; letter-spacing:0.05em; padding:0 12px 8px;">On this page</div>
+                    <a href="#getting-started">Getting Started</a>
+                    <a href="#discord">Discord Bot</a>
+                    <a href="#dashboard-guide">Dashboard</a>
+                    <a href="#projects-guide">Projects</a>
+                    <a href="#loader">Using the Loader</a>
+                    <a href="#plans">Plans (Free/Pro/Enterprise)</a>
+                    <a href="#admin">Admin Setup</a>
+                    <a href="#troubleshooting">Troubleshooting</a>
+                </aside>
+
+                <!-- Content -->
+                <div>
+
+                <!-- ============ GETTING STARTED ============ -->
+                <div class="card help-section" id="getting-started">
+                    <h2>Getting Started</h2>
+                    <p>NexaKS is a script authentication system with HWID locking, license keys, and per-project script serving. Here's the quick flow for new users:</p>
+                    <ol>
+                        <li>Get a <strong>license key</strong> from an admin or purchase channel.</li>
+                        <li>Redeem the key â€” either on this website via <strong>Dashboard â†’ Redeem Key</strong>, or on Discord using <code>/redeem</code>.</li>
+                        <li>Copy your <strong>loader script</strong> from the Dashboard or the Discord panel.</li>
+                        <li>Paste the loader into your Roblox executor and run.</li>
+                    </ol>
+                    <div class="callout">First execution binds your key to your device (HWID). If you switch devices, use <strong>Reset HWID</strong> (24-hour cooldown).</div>
+                </div>
+
+                <!-- ============ DISCORD ============ -->
+                <div class="card help-section" id="discord">
+                    <h2>Discord Bot Commands</h2>
+                    <p>The Discord bot is where most users manage their license day-to-day. Below is every available command.</p>
+
+                    <h3>For All Users</h3>
+                    <table class="cmd-table" style="width:100%;">
+                        <tbody>
+                            <tr><td><code>/redeem key:NXKS-...</code></td><td>Activate a license key on your Discord account.</td></tr>
+                            <tr><td><code>/keyinfo</code></td><td>View your license details â€” plan, expiry, HWID, executions.</td></tr>
+                            <tr><td><code>/resethwid</code></td><td>Unlink your device so you can bind a new one. 24h cooldown, 5 resets max.</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Panel Buttons</h3>
+                    <p>Admins post an interactive panel with these buttons â€” no typing needed:</p>
+                    <ul>
+                        <li><strong>Redeem Key</strong> â€” opens a form to paste your key</li>
+                        <li><strong>Get Role</strong> â€” assigns the Verified role once you have an active key</li>
+                        <li><strong>Get Script</strong> â€” sends your loader via DM (or ephemeral reply if DMs are closed)</li>
+                        <li><strong>Reset HWID (24h)</strong> â€” shows confirmation, then resets your hardware ID</li>
+                        <li><strong>Session Status</strong> â€” same as <code>/keyinfo</code></li>
+                        <li><strong>Open Dashboard</strong> â€” link to this website</li>
+                    </ul>
+
+                    <div class="callout warn"><strong>DM tip:</strong> Enable "Allow direct messages from server members" in your Discord privacy settings so the bot can DM your loader privately.</div>
+                </div>
+
+                <!-- ============ DASHBOARD ============ -->
+                <div class="card help-section" id="dashboard-guide">
+                    <h2>Using the Dashboard</h2>
+                    <p>The Dashboard is your control center for a single license. Sign in with Discord to access it.</p>
+
+                    <h3>What each card shows</h3>
+                    <ul>
+                        <li><strong>License Status</strong> â€” active, expired, or revoked</li>
+                        <li><strong>Expires In</strong> â€” days left before your license needs renewal</li>
+                        <li><strong>HWID Resets</strong> â€” how many device changes you've used out of 5</li>
+                        <li><strong>Executions</strong> â€” how many times the script has run on your key</li>
+                    </ul>
+
+                    <h3>Actions</h3>
+                    <ul>
+                        <li><strong>Redeem Key</strong> â€” paste a new key to activate</li>
+                        <li><strong>Copy</strong> (on License Key card) â€” copies your key to clipboard</li>
+                        <li><strong>Reset HWID</strong> â€” unlinks your device (24h cooldown)</li>
+                        <li><strong>Copy Loader</strong> â€” copies the ready-to-paste loader for your executor</li>
+                    </ul>
+
+                    <h3>Activity log</h3>
+                    <p>The Activity section shows the last 10 events on your account â€” redeems, HWID resets, script executions, and failed attempts. Use it to check if your key is being used from unexpected devices.</p>
+                </div>
+
+                <!-- ============ PROJECTS ============ -->
+                <div class="card help-section" id="projects-guide">
+                    <h2>Projects (For Owners)</h2>
+                    <p>Projects are containers for your scripts. If you own scripts and want to sell/share them, this is where you organize them.</p>
+
+                    <h3>Creating a project</h3>
+                    <ol>
+                        <li>Go to <strong>Projects â†’ New Project</strong>.</li>
+                        <li>Enter a name (e.g. "Blox Fruits Hub") and a slug (short URL id like <code>bloxfruits</code>).</li>
+                        <li>Click Create â€” you'll be taken to the project detail page.</li>
+                    </ol>
+
+                    <h3>What's inside a project</h3>
+                    <ul>
+                        <li><strong>Scripts</strong> â€” the Lua code that gets served. Each script has a plan (Free/Pro/Enterprise), a Keyless toggle, and a Publish/Draft status. Only <em>published</em> scripts go live.</li>
+                        <li><strong>Blacklist</strong> â€” ban specific HWIDs, IPs, or users from this project.</li>
+                        <li><strong>Whitelist</strong> â€” pre-approve specific HWIDs or users (only enforced if whitelist-only mode is on).</li>
+                        <li><strong>Activity</strong> â€” the last 20 events specific to this project.</li>
+                    </ul>
+
+                    <h3>Getting the loader</h3>
+                    <p>Once a script is <strong>published</strong>, click the <strong>Loader</strong> button beside it. A modal will show the exact loadstring code to distribute:</p>
+                    <ul>
+                        <li><strong>Keyless script</strong> â†’ 1-line loader, runs for anyone</li>
+                        <li><strong>Key-based script</strong> â†’ 2-line loader with <code>_G.script_key</code> placeholder to fill in</li>
+                    </ul>
+
+                    <div class="callout"><strong>Keys must be attached to a project.</strong> When you generate a key, link it to the right project so users get the correct script. Ask your admin to help if you're unsure.</div>
+                </div>
+
+                <!-- ============ LOADER ============ -->
+                <div class="card help-section" id="loader">
+                    <h2>Using the Loader in Roblox</h2>
+                    <p>The loader is a short piece of Lua code that verifies your key and runs the protected script. Two formats:</p>
+
+                    <h3>Keyless (open access)</h3>
+                    <pre>loadstring(game:HttpGet("https://keyora-gyuu.onrender.com/api/load/PROJECT?script=SCRIPT_ID"))()</pre>
+                    <p>Just paste and run â€” no key needed.</p>
+
+                    <h3>Key-based (license required)</h3>
+                    <pre>_G.script_key = "NXKS-XXXX-XXXX-XXXX-XXXX"
+loadstring(game:HttpGet("https://keyora-gyuu.onrender.com/api/load/PROJECT?script=SCRIPT_ID&key=".._G.script_key))()</pre>
+                    <p>Replace <code>NXKS-XXXX-...</code> with your actual key from the Dashboard, then paste and run.</p>
+
+                    <h3>How to run it</h3>
+                    <ol>
+                        <li>Open your Roblox executor (Delta, Wave, Solara, etc.)</li>
+                        <li>Copy the entire loader â€” every character matters</li>
+                        <li>Paste into the executor's script box</li>
+                        <li>Click Execute / Run</li>
+                    </ol>
+
+                    <div class="callout danger"><strong>Never share your key-based loader.</strong> It contains your personal license. Sharing = permanent revocation and ban.</div>
+                </div>
+
+                <!-- ============ PLANS ============ -->
+                <div class="card help-section" id="plans">
+                    <h2>Plans â€” Free, Pro, Enterprise</h2>
+                    <p>Every key and script has a plan tier. This lets you offer different features to different customers.</p>
+
+                    <table class="cmd-table" style="width:100%;">
+                        <tbody>
+                            <tr><td><span class="badge badge-info">Free</span></td><td>Trial / basic tier â€” usually keyless or limited features.</td></tr>
+                            <tr><td><span class="badge badge-info">Pro</span></td><td>Standard paid tier â€” full features.</td></tr>
+                            <tr><td><span class="badge badge-warning">Enterprise</span></td><td>Premium tier â€” everything + priority.</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>How matching works</h3>
+                    <p>When a user loads a script, the system picks the script whose plan matches the user's key plan. If there's no exact match, it falls back to the <strong>Free</strong> script â€” so always publish a Free version if you want everyone to have something.</p>
+
+                    <div class="callout">If you only have one tier, just use <strong>Free</strong> for both key and script â€” the tier system is optional.</div>
+                </div>
+
+                <!-- ============ ADMIN ============ -->
+                <div class="card help-section" id="admin">
+                    <h2>Admin Setup (For Owners)</h2>
+
+                    <h3>Making yourself an admin</h3>
+                    <p>Run this in Supabase â†’ SQL Editor (replace with your Discord user ID):</p>
+                    <pre>UPDATE users SET is_admin = true
+WHERE discord_id = 'YOUR_DISCORD_USER_ID';</pre>
+                    <p>Get your Discord ID: enable Developer Mode (Settings â†’ Advanced), then right-click your username â†’ Copy User ID.</p>
+
+                    <h3>Admin Discord commands</h3>
+                    <table class="cmd-table" style="width:100%;">
+                        <tbody>
+                            <tr><td><code>/setup-panel project:SLUG</code></td><td>Post the interactive panel, optionally tied to a project.</td></tr>
+                            <tr><td><code>/generate plan:pro duration:30 quantity:5</code></td><td>Generate license keys. Durations: 1, 7, 30, 90, 365, or lifetime.</td></tr>
+                            <tr><td><code>/revoke key:NXKS-...</code></td><td>Revoke a key â€” user loses access immediately.</td></tr>
+                            <tr><td><code>/lookup user:@name</code></td><td>Look up a user's account, keys, and status.</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3>Attaching keys to a project</h3>
+                    <p>Keys generated via <code>/generate</code> aren't automatically linked to a project. Run this in Supabase to link them:</p>
+                    <pre>UPDATE keys
+SET project_id = (SELECT id FROM projects WHERE slug = 'YOUR_SLUG')
+WHERE key = 'NXKS-XXXX-XXXX-XXXX-XXXX';</pre>
+                </div>
+
+                <!-- ============ TROUBLESHOOTING ============ -->
+                <div class="card help-section" id="troubleshooting">
+                    <h2>Troubleshooting</h2>
+
+                    <h3>"Invalid license key"</h3>
+                    <p>The key doesn't exist or hasn't been generated. Double-check spelling (keys are case-sensitive) and make sure you got it from a legitimate source.</p>
+
+                    <h3>"Hardware ID mismatch"</h3>
+                    <p>You're running on a different device than the one your key is bound to. Use <code>/resethwid</code> on Discord (24h cooldown) or the Reset HWID button on the Dashboard.</p>
+
+                    <h3>"License expired"</h3>
+                    <p>Your key's duration has ended. Contact the admin for renewal or purchase a new key.</p>
+
+                    <h3>"This project is currently paused"</h3>
+                    <p>The project owner paused the project. Nothing you can do until they resume it â€” reach out to the owner.</p>
+
+                    <h3>"Access denied â€” blacklisted"</h3>
+                    <p>Your HWID, IP, or account has been blacklisted from this project. Contact the owner if you think this is a mistake.</p>
+
+                    <h3>"Script not found or not published"</h3>
+                    <p>The project has no published script for your plan. Either the owner hasn't uploaded one yet, or they only published a higher-tier script than your key.</p>
+
+                    <h3>Empty response / network error</h3>
+                    <p>The server might be waking up (first request after inactivity can be slow). Wait 30 seconds and try again. If it persists, contact the admin.</p>
+
+                    <h3>Loader doesn't do anything</h3>
+                    <ul>
+                        <li>Make sure you copied the <em>entire</em> loader â€” every character.</li>
+                        <li>Make sure your executor supports <code>HttpGet</code> and <code>loadstring</code> (most modern ones do).</li>
+                        <li>Check the executor console for any warning messages starting with <code>[NexaKS]</code>.</li>
+                    </ul>
+
+                    <div class="callout">Still stuck? Ask on Discord â€” provide the exact error message and what you were doing when it happened.</div>
+                </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+    <script>
+        // Simple auth check + sidebar behavior (reuses NexaKS from js/supabase.js)
+        document.addEventListener('DOMContentLoaded', async () => {
+            const loader = document.getElementById('authLoader');
+            const main = document.getElementById('helpMain');
+            try {
+                const user = await NexaKS.getCurrentUser();
+                if (!user) { window.location.href = '/'; return; }
+                const profile = await NexaKS.getUserProfile(user.id);
+                if (profile?.is_admin) {
+                    const link = document.getElementById('adminLink');
+                    if (link) { link.style.display = 'flex'; link.href = 'admin.html'; }
+                }
+            } catch (e) { console.error(e); }
+            if (loader) loader.style.display = 'none';
+            if (main) main.style.display = 'grid';
+
+            // TOC active-link on scroll
+            const links = document.querySelectorAll('.help-toc a');
+            const sections = [...document.querySelectorAll('.help-section')];
+            function onScroll() {
+                let active = sections[0]?.id;
+                for (const s of sections) {
+                    if (s.getBoundingClientRect().top < 100) active = s.id;
+                }
+                links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + active));
+            }
+            window.addEventListener('scroll', onScroll);
+            onScroll();
+        });
+        function toggleSidebar() { document.getElementById('sidebar')?.classList.toggle('open'); }
+        async function handleLogout() { if (confirm('Sign out from NexaKS?')) await NexaKS.signOut(); }
+    </script>
+</body>
+</html>
