@@ -337,22 +337,44 @@ function showLoader(projectId, scriptId) {
     const s = p?.scripts.find(x => x.id === scriptId);
     if (!p || !s) return;
     const origin = window.location.origin;
+    const verifyBase = origin + '/api/verify';
+    const statusBase = origin + '/api/status';
+    const projectKey = encodeURIComponent(String(p.api_key));
+    const scriptKey = encodeURIComponent(String(s.id));
     const loader =
-`-- NexaKS Loader — ${p.name} / ${s.name}
-local license = "PASTE_KEY_HERE"
-local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-local url = "${origin}/api/verify?license=" .. license .. "&hwid=" .. hwid .. "&project=${p.api_key}&script=${s.id}"
-local ok, response = pcall(function() return game:HttpGet(url, true) end)
-if not ok then return error("NexaKS: Network error") end
-loadstring(response)()`;
+`-- NexForge authorized loader - ${p.name} / ${s.name}
+local license = \"PASTE_KEY_HERE\"
+local hwid = game:GetService(\"RbxAnalyticsService\"):GetClientId()
+
+local function encode(value)
+    return (tostring(value):gsub(\"([^%w%-_%.~])\", function(char)
+        return string.format(\"%%%02X\", string.byte(char))
+    end))
+end
+
+local url = \"${verifyBase}?project=${projectKey}&script=${scriptKey}&license=\" .. encode(license) .. \"&hwid=\" .. encode(hwid)
+local requestOk, response = pcall(function()
+    return game:HttpGet(url, true)
+end)
+if not requestOk then error(\"NexForge: Unable to reach the licensing service\") end
+if type(response) ~= \"string\" or response == \"\" then error(\"NexForge: Empty server response\") end
+
+local chunk, compileError = loadstring(response)
+if not chunk then error(\"NexForge: Invalid server response: \" .. tostring(compileError)) end
+local runOk, runError = pcall(chunk)
+if not runOk then error(tostring(runError)) end`;
+    const statusUrl = statusBase + '?project=' + projectKey + '&script=' + scriptKey + '&license=PASTE_KEY_HERE&hwid=PASTE_HWID_HERE';
     // reuse settings modal shell for a quick loader view
     currentProject = p;
-    document.getElementById('setTitle').textContent = 'Loader — ' + s.name;
+    document.getElementById('setTitle').textContent = 'Loader - ' + s.name;
     document.getElementById('setTabs').style.display = 'none';
     document.getElementById('setContent').innerHTML = `
-        <p class="sub">Paste this into your executor. Replace <strong>PASTE_KEY_HERE</strong> with the user's key.</p>
-        <div class="code-block">${escapeHtml(loader)}</div>
-        <button class="btn-sm" style="margin-top:10px;" onclick='copyText(${JSON.stringify(loader)})'>Copy loader</button>`;
+        <p class=\"sub\">Use this only to load scripts for authorized users. Replace <strong>PASTE_KEY_HERE</strong> with the user's license key.</p>
+        <div class=\"code-block\">${escapeHtml(loader)}</div>
+        <button class=\"btn-sm\" style=\"margin-top:10px;\" onclick='copyText(${JSON.stringify(loader)})'>Copy loader</button>
+        <h3 style=\"color:#fff;margin:18px 0 8px;font-size:14px;\">Status endpoint (no source returned)</h3>
+        <div class=\"code-block\">${escapeHtml(statusUrl)}</div>
+        <button class=\"btn-sm\" style=\"margin-top:10px;\" onclick='copyText(${JSON.stringify(statusUrl)})'>Copy status URL</button>`;
     document.getElementById('settingsModal').classList.add('show');
 }
 
