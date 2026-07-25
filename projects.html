@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projects — NexaKS</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+
+    <div id="authLoader" style="position:fixed; inset:0; background:var(--bg-primary); display:flex; align-items:center; justify-content:center; z-index:9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <div class="dashboard-layout" style="display:none;" id="projectsMain">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <a href="index.html" class="logo">
+                    <svg class="logo-mark" width="24" height="24" viewBox="0 0 32 32" fill="none">
+                        <path d="M16 2L4 9v14l12 7 12-7V9L16 2z" stroke="url(#logoGrad)" stroke-width="2" stroke-linejoin="round"/>
+                        <path d="M16 10v12M11 13l5-3 5 3M11 19l5 3 5-3" stroke="url(#logoGrad)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <defs>
+                            <linearGradient id="logoGrad" x1="4" y1="2" x2="28" y2="30">
+                                <stop offset="0%" stop-color="#7c3aed"/>
+                                <stop offset="100%" stop-color="#ec4899"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <span class="logo-text">NexaKS</span>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-section-title">Main</div>
+                <a href="dashboard.html">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12l9-9 9 9M5 10v10h4v-6h6v6h4V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Dashboard
+                </a>
+                <a href="projects.html" class="active">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 7h7l2 2h9v10a1 1 0 01-1 1H4a1 1 0 01-1-1V7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    Projects
+                </a>
+
+                <div class="sidebar-section-title">Support</div>
+                <a href="#">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 4h16v14H5.5L4 20V4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    Documentation
+                </a>
+                <a href="#" id="adminLink" style="display:none;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    Admin Panel
+                </a>
+
+                <div class="sidebar-section-title">Account</div>
+                <a href="#" onclick="handleLogout(); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Sign Out
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main content -->
+        <main class="main-content">
+            <div class="page-header">
+                <div style="display:flex; align-items:center; gap:16px;">
+                    <button class="sidebar-toggle" onclick="toggleSidebar()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </button>
+                    <div>
+                        <h1 class="page-title">Projects</h1>
+                        <p class="page-subtitle">Manage your applications, scripts, and access control</p>
+                    </div>
+                </div>
+                <div class="user-menu">
+                    <img id="userAvatarImg" style="display:none; width:32px; height:32px; border-radius:50%;" alt="">
+                    <div class="user-avatar" id="userAvatar">?</div>
+                    <div class="user-info">
+                        <div class="user-name" id="userNameSmall">Loading...</div>
+                        <div class="user-role">Owner</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ LIST VIEW ============ -->
+            <div id="projectsListView">
+                <div style="display:flex; justify-content:flex-end; margin-bottom:20px;">
+                    <button class="btn btn-primary" onclick="openCreateModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        New Project
+                    </button>
+                </div>
+
+                <div class="card" id="projectsEmpty" style="display:none; text-align:center; padding:60px 24px;">
+                    <div style="width:64px; height:64px; margin:0 auto 20px; background:rgba(124,58,237,0.1); border-radius:12px; display:flex; align-items:center; justify-content:center; color:var(--accent-hover);">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M3 7h7l2 2h9v10a1 1 0 01-1 1H4a1 1 0 01-1-1V7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    </div>
+                    <h2 style="font-size:22px; font-weight:700; margin-bottom:8px; letter-spacing:-0.02em;">No projects yet</h2>
+                    <p style="color:var(--text-secondary); margin-bottom:24px; max-width:400px; margin-left:auto; margin-right:auto;">Create your first project to start issuing keys and serving scripts with its own access control.</p>
+                    <button class="btn btn-primary" onclick="openCreateModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        Create Project
+                    </button>
+                </div>
+
+                <div class="stats-grid" id="projectsGrid"></div>
+            </div>
+
+            <!-- ============ DETAIL VIEW ============ -->
+            <div id="projectDetailView" style="display:none;">
+                <button class="btn btn-ghost" onclick="backToList()" style="margin-bottom:16px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Back to projects
+                </button>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title" id="detailName">Project</div>
+                            <div class="card-desc">Slug: <span id="detailSlug" style="font-family:'JetBrains Mono',monospace;">—</span></div>
+                        </div>
+                        <span class="badge badge-success" id="detailStatus">active</span>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+                        <button class="btn btn-ghost" onclick="toggleProjectStatus()">Pause / Resume</button>
+                        <button class="btn btn-ghost" onclick="deleteProject()" style="color:#ef4444;">Delete Project</button>
+                    </div>
+                </div>
+
+                <!-- Scripts -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Scripts</div>
+                            <div class="card-desc">Lua payloads served for this project (published scripts go live)</div>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="table">
+                            <thead><tr><th>Name</th><th>Plan</th><th>Version</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="scriptsBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+                        <div class="info-grid">
+                            <div class="form-group"><label class="form-label">Script Name</label><input type="text" class="form-input" id="scriptName" placeholder="Main Script"></div>
+                            <div class="form-group"><label class="form-label">Plan</label>
+                                <select class="form-input" id="scriptPlan"><option value="free">Free</option><option value="pro">Pro</option><option value="enterprise">Enterprise</option></select>
+                            </div>
+                        </div>
+                        <div class="form-group"><label class="form-label">Lua Content</label><textarea class="form-textarea" id="scriptContent" placeholder="print('Hello from NexaKS')" style="min-height:100px; font-size:12px;"></textarea></div>
+                        <button class="btn btn-primary" onclick="addScript()">Save Script</button>
+                    </div>
+                </div>
+
+                <!-- Blacklist -->
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Blacklist</div><div class="card-desc">Block HWIDs, IPs, or users from this project</div></div></div>
+                    <div class="table-wrapper">
+                        <table class="table">
+                            <thead><tr><th>Type</th><th>Value</th><th>Reason</th><th></th></tr></thead>
+                            <tbody id="blacklistBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                        <div class="form-group" style="margin:0;"><label class="form-label">Type</label>
+                            <select class="form-input" id="blType"><option value="hwid">HWID</option><option value="ip">IP</option><option value="user">User</option></select>
+                        </div>
+                        <div class="form-group" style="margin:0; flex:1;"><label class="form-label">Value</label><input type="text" class="form-input" id="blValue" placeholder="value to block"></div>
+                        <div class="form-group" style="margin:0; flex:1;"><label class="form-label">Reason</label><input type="text" class="form-input" id="blReason" placeholder="optional"></div>
+                        <button class="btn btn-primary" onclick="addBlacklist()">Add</button>
+                    </div>
+                </div>
+
+                <!-- Whitelist -->
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Whitelist</div><div class="card-desc">Pre-approved HWIDs / users (used when whitelist-only mode is on)</div></div></div>
+                    <div class="table-wrapper">
+                        <table class="table">
+                            <thead><tr><th>Type</th><th>Value</th><th>Note</th><th></th></tr></thead>
+                            <tbody id="whitelistBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                        <div class="form-group" style="margin:0;"><label class="form-label">Type</label>
+                            <select class="form-input" id="wlType"><option value="hwid">HWID</option><option value="user">User</option></select>
+                        </div>
+                        <div class="form-group" style="margin:0; flex:1;"><label class="form-label">Value</label><input type="text" class="form-input" id="wlValue" placeholder="value to allow"></div>
+                        <button class="btn btn-primary" onclick="addWhitelist()">Add</button>
+                    </div>
+                </div>
+
+                <!-- Logs -->
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Activity</div><div class="card-desc">Last 20 events on this project</div></div></div>
+                    <div class="table-wrapper">
+                        <table class="table">
+                            <thead><tr><th>Event</th><th>Details</th><th>Time</th></tr></thead>
+                            <tbody id="projLogsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create Project Modal -->
+    <div class="modal-overlay" id="createModal">
+        <div class="modal">
+            <div class="modal-title">New Project</div>
+            <div class="modal-desc">Create a container for keys, scripts and access control.</div>
+            <div class="form-group"><label class="form-label">Name</label><input type="text" class="form-input" id="projName" placeholder="My Script Hub"></div>
+            <div class="form-group"><label class="form-label">Slug (optional)</label><input type="text" class="form-input" id="projSlug" placeholder="auto-generated from name" style="font-family:'JetBrains Mono',monospace;"></div>
+            <div class="form-group"><label class="form-label">Description (optional)</label><textarea class="form-textarea" id="projDesc" placeholder="What is this project for?"></textarea></div>
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeCreateModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmCreate()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+    <script src="js/projects.js"></script>
+</body>
+</html>
