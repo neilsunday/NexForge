@@ -62,6 +62,7 @@ const VC = {
     PROJECT_DISABLED: 'Project is disabled',
     SCRIPT_NOT_FOUND: 'Script not found',
     SCRIPT_DISABLED: 'This script is currently disabled',
+    SCRIPT_NOT_PUBLISHED: 'This script has not been published yet',
     KEY_REQUIRED: 'License key required',
     KEY_INCORRECT: 'Invalid license key',
     KEY_UNASSIGNED: 'License not activated',
@@ -283,7 +284,7 @@ app.get('/api/projects/:id/scripts/:scriptId', requireAuth, async (req, res) => 
     res.json({ script: data });
 });
 
-/* ---------- ADD script ---------- */
+/* ---------- ADD script as a draft ---------- */
 app.post('/api/projects/:id/scripts', requireAuth, async (req, res) => {
     const project = await ownedProject(req, res); if (!project) return;
     const { name, script_content, version, status, obfuscated } = req.body || {};
@@ -296,35 +297,125 @@ app.post('/api/projects/:id/scripts', requireAuth, async (req, res) => {
         project_id: project.id,
         name: String(name).trim().slice(0, 100),
         script_content: script_content || '',
-        version: (version || '0.0.0.0').slice(0, 20),
+        version: String(version || '0.0.0.0').slice(0, 20),
         status: status || 'free',
-        obfuscated: !!obfuscated
+        obfuscated: !!obfuscated,
+        draft_updated_at: new Date().toISOString(),
+        draft_updated_by: req.user.id
     };
     const { data, error } = await sb.from('project_scripts')
         .insert(insert).select().single();
     if (error) return res.status(500).json({ error: error.message });
 
-    await writeProjectLog(project.id, null, 'script_created', 'info',
-        `Script "${insert.name}" created`, null, null);
+    await writeProjectLog(project.id, null, 'script_draft_created', 'info',
+        `Draft created for script "${insert.name}"`, null, null);
     res.status(201).json({ script: data });
 });
 
-/* ---------- UPDATE script ---------- */
+/* ---------- UPDATE script draft / metadata ---------- */
 app.patch('/api/projects/:id/scripts/:scriptId', requireAuth, async (req, res) => {
     const project = await ownedProject(req, res); if (!project) return;
-
     const allowed = ['name', 'script_content', 'version', 'status', 'enabled', 'obfuscated'];
     const patch = {};
     for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
     if (patch.name !== undefined) patch.name = String(patch.name).trim().slice(0, 100);
+    if (patch.version !== undefined) patch.version = String(patch.version).slice(0, 20);
     if (patch.status && !['active', 'free', 'disabled'].includes(patch.status))
         return res.status(400).json({ error: 'Invalid status' });
+    if ('script_content' in patch || 'version' in patch) {
+        patch.draft_updated_at = new Date().toISOString();
+        patch.draft_updated_by = req.user.id;
+    }
 
     const { data, error } = await sb.from('project_scripts')
         .update(patch).eq('id', req.params.scriptId)
-        .eq('project_id', project.id).select().single();
+        .eq('project_id', project.id).is('deleted_at', null).select().single();
     if (error || !data) return res.status(404).json({ error: 'Script not found' });
+    await writeProjectLog(project.id, null, 'script_draft_updated', 'info',
+        `Draft updated for script "${data.name}"`, null, null);
     res.json({ script: data });
+});
+
+/* ---------- PUBLISH current draft ---------- */
+app.post('/api/projects/:id/scripts/:scriptId/publish', requireAuth, async (req, res) => {
+    const project = await ownedProject(req, res); if (!project) return;
+    const { notes } = req.body || {};
+    const { data: script } = await sb.from('project_scripts').select('*')
+        .eq('id', req.params.scriptId).eq('project_id', project.id)
+        .is('deleted_at', null).maybeSingle();
+    if (!script) return res.status(404).json({ error: 'Script not found' });
+    if (!String(script.script_content || '').trim())
+        return res.status(400).json({ error: 'Draft source is empty' });
+
+    const checksum = crypto.createHash('sha256')
+        .update(String(script.script_content), 'utf8').digest('hex');
+    let current = null;
+    if (script.published_version_id) {
+        const result = await sb.from('script_versions').select('*')
+            .eq('id', script.published_version_id).maybeSingle();
+        current = result.data;
+    }
+    if (current && current.source_checksum === checksum && current.version === script.version)
+        return res.status(409).json({ error: 'Draft is identical to the published version' });
+
+    const { data: versionRow, error: versionError } = await sb.from('script_versions')
+        .insert({
+            script_id: script.id, project_id: project.id,
+            version: script.version || '0.0.0.0', source_content: script.script_content,
+            source_checksum: checksum, state: 'published',
+            publish_notes: String(notes || '').slice(0, 1000), author_id: req.user.id
+        }).select().single();
+    if (versionError) return res.status(500).json({ error: versionError.message });
+    if (current) await sb.from('script_versions').update({ state: 'superseded' }).eq('id', current.id);
+
+    const { data: updated, error } = await sb.from('project_scripts')
+        .update({ published_version_id: versionRow.id })
+        .eq('id', script.id).eq('project_id', project.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    await writeProjectLog(project.id, null, 'script_published', 'success',
+        `Published ${script.name} v${versionRow.version}`, null, null);
+    res.status(201).json({ script: updated, version: versionRow });
+});
+
+/* ---------- VERSION HISTORY ---------- */
+app.get('/api/projects/:id/scripts/:scriptId/versions', requireAuth, async (req, res) => {
+    const project = await ownedProject(req, res); if (!project) return;
+    const { data: script } = await sb.from('project_scripts').select('id, published_version_id')
+        .eq('id', req.params.scriptId).eq('project_id', project.id)
+        .is('deleted_at', null).maybeSingle();
+    if (!script) return res.status(404).json({ error: 'Script not found' });
+    const { data, error } = await sb.from('script_versions')
+        .select('id, version, source_checksum, state, publish_notes, author_id, created_at, published_at')
+        .eq('script_id', script.id).eq('project_id', project.id)
+        .order('published_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ published_version_id: script.published_version_id, versions: data || [] });
+});
+
+/* ---------- ROLLBACK published pointer ---------- */
+app.post('/api/projects/:id/scripts/:scriptId/rollback/:versionId', requireAuth, async (req, res) => {
+    const project = await ownedProject(req, res); if (!project) return;
+    const { data: script } = await sb.from('project_scripts').select('*')
+        .eq('id', req.params.scriptId).eq('project_id', project.id)
+        .is('deleted_at', null).maybeSingle();
+    if (!script) return res.status(404).json({ error: 'Script not found' });
+    const { data: target } = await sb.from('script_versions').select('*')
+        .eq('id', req.params.versionId).eq('script_id', script.id)
+        .eq('project_id', project.id).maybeSingle();
+    if (!target) return res.status(404).json({ error: 'Version not found' });
+    if (script.published_version_id === target.id)
+        return res.status(409).json({ error: 'Version is already published' });
+
+    if (script.published_version_id) await sb.from('script_versions')
+        .update({ state: 'superseded' }).eq('id', script.published_version_id);
+    await sb.from('script_versions').update({ state: 'rolled_back' }).eq('id', target.id);
+    const { data: updated, error } = await sb.from('project_scripts')
+        .update({ published_version_id: target.id })
+        .eq('id', script.id).eq('project_id', project.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    await writeProjectLog(project.id, null, 'script_rolled_back', 'warning',
+        `Rolled back ${script.name} to v${target.version}`, null, null);
+    res.json({ script: updated, version: target });
 });
 
 /* ---------- TOGGLE script on/off ---------- */
@@ -769,15 +860,22 @@ app.get('/api/verify', async (req, res) => {
         if (projectRow) {
             if (scriptId) {
                 if (!safeId(scriptId)) return fail('SCRIPT_NOT_FOUND', projectRow.id);
-                const { data } = await sb.from('project_scripts').select('*')
-                    .eq('id', scriptId).eq('project_id', projectRow.id).maybeSingle();
+                const { data } = await sb.from('project_scripts')
+                    .select('*, published_version:script_versions!project_scripts_published_version_fkey(id, version, source_content, source_checksum, state, published_at)')
+                    .eq('id', scriptId).eq('project_id', projectRow.id)
+                    .is('deleted_at', null).maybeSingle();
                 if (!data) return fail('SCRIPT_NOT_FOUND', projectRow.id);
                 if (!data.enabled || data.status === 'disabled') return fail('SCRIPT_DISABLED', projectRow.id);
+                if (!data.published_version_id || !data.published_version)
+                    return fail('SCRIPT_NOT_PUBLISHED', projectRow.id);
                 scriptRow = data;
             } else {
-                const { data } = await sb.from('project_scripts').select('*')
+                const { data } = await sb.from('project_scripts')
+                    .select('*, published_version:script_versions!project_scripts_published_version_fkey(id, version, source_content, source_checksum, state, published_at)')
                     .eq('project_id', projectRow.id).eq('enabled', true).neq('status', 'disabled')
+                    .not('published_version_id', 'is', null).is('deleted_at', null)
                     .order('created_at', { ascending: true }).limit(1).maybeSingle();
+                if (data && !data.published_version) return fail('SCRIPT_NOT_PUBLISHED', projectRow.id);
                 scriptRow = data;
             }
         }
@@ -893,8 +991,11 @@ app.get('/api/verify', async (req, res) => {
 
 // Build the Lua payload for a resolved script (project script > legacy > plan > fallback)
 function buildPayload(projectRow, scriptRow, key) {
-    if (scriptRow && scriptRow.script_content) return scriptRow.script_content;
-    if (projectRow && projectRow.script_content) return projectRow.script_content;
+    if (scriptRow?.published_version?.source_content)
+        return scriptRow.published_version.source_content;
+    // Backward compatibility applies only to legacy project records without
+    // a project_scripts row. Draft source is never served publicly.
+    if (!scriptRow && projectRow?.script_content) return projectRow.script_content;
     if (key) { /* legacy plan-based handled by caller via fetchScriptForKey */ }
     return fallbackPayload(key || { key: '', plan: 'free' });
 }
