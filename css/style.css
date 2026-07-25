@@ -1389,3 +1389,63 @@ body {
         justify-content: center;
     }
 }
+
+
+/* ==============================
+   Responsive improvements
+   ============================== */
+
+/* Help page 2-column grid collapses on tablets */
+@media (max-width: 900px) {
+    main.main-content > div[style*="grid-template-columns: 220px 1fr"] {
+        grid-template-columns: 1fr !important;
+    }
+    .help-toc { position: relative !important; margin-bottom: 20px; }
+}
+
+@media (max-width: 968px) {
+    .main-content { padding: 20px 16px; }
+    .page-header { flex-direction: column; align-items: flex-start; }
+    .user-menu { width: 100%; justify-content: flex-start; }
+    .stats-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .info-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+    .card { padding: 18px; }
+    .card-header { flex-direction: column; align-items: flex-start; }
+    .table th, .table td { padding: 10px 12px; font-size: 13px; }
+    .key-display { padding: 12px; }
+    .key-value { font-size: 12px; min-width: 0; }
+}
+
+@media (max-width: 640px) {
+    .main-content { padding: 16px 12px; }
+    .page-title { font-size: 20px; }
+    .page-subtitle { font-size: 13px; }
+    .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat-card { padding: 16px; }
+    .stat-card-value { font-size: 22px; }
+    .info-grid { grid-template-columns: 1fr 1fr; }
+    .btn { padding: 8px 14px; font-size: 13px; }
+    .btn-lg { padding: 12px 18px; font-size: 14px; }
+    .modal { padding: 20px; max-height: 90vh; overflow-y: auto; }
+    .modal-actions { flex-direction: column-reverse; }
+    .modal-actions .btn { width: 100%; }
+    .toast { min-width: unset; max-width: calc(100vw - 48px); }
+    .toast-container { top: 12px; right: 12px; left: 12px; }
+    .form-input, .form-select, .form-textarea { font-size: 16px; }
+    .user-info { font-size: 13px; }
+    .user-menu { padding: 6px 12px; }
+    .card-title { font-size: 15px; }
+    .card-desc { font-size: 12px; }
+}
+
+@media (max-width: 400px) {
+    .stats-grid { grid-template-columns: 1fr; }
+    .info-grid { grid-template-columns: 1fr; }
+}
+
+/* Long strings never blow out the layout */
+.key-value, .info-value, pre, code, .form-input, .form-textarea {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+pre { white-space: pre-wrap; }
