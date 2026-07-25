@@ -1,4 +1,4 @@
-/* NexaKS - Dashboard JS (loop-proof, safe) */
+/* NexaKS - Dashboard JS (with fixed Lua loader) */
 
 let currentUser = null;
 let currentProfile = null;
@@ -8,20 +8,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const loader = document.getElementById('authLoader');
     const main = document.getElementById('dashboardMain');
 
-    // Safety timeout: kahit anong mangyari, hide loader after 6 secs
     const forceShow = setTimeout(() => {
         if (loader) loader.style.display = 'none';
         if (main) main.style.display = 'grid';
     }, 6000);
 
     try {
-        // Get session â€” NO auto-redirect
         currentUser = await NexaKS.getCurrentUser();
 
-        // If no session, redirect ONCE (with flag to prevent bounce)
         if (!currentUser) {
             if (sessionStorage.getItem('nexaks_redirected')) {
-                // Already tried once â€” stay here and show error
                 sessionStorage.removeItem('nexaks_redirected');
                 clearTimeout(forceShow);
                 if (loader) loader.innerHTML = '<div style="text-align:center;color:white;padding:40px;"><h2>Not signed in</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">go back</a> and sign in with Discord.</p></div>';
@@ -32,13 +28,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Clear redirect flag - we made it in
         sessionStorage.removeItem('nexaks_redirected');
 
-        // Try to load profile, create if missing
         currentProfile = await NexaKS.getUserProfile(currentUser.id);
         if (!currentProfile) {
-            console.warn('No profile row, creating manually...');
             const meta = currentUser.user_metadata || {};
             try {
                 const { data } = await NexaKS.supabase.from('users').insert({
@@ -48,10 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     avatar_url: meta.avatar_url || null
                 }).select().maybeSingle();
                 currentProfile = data;
-            } catch (e) {
-                console.error('Manual profile insert:', e);
-            }
-            // Fallback: build in-memory profile from OAuth metadata
+            } catch (e) { console.error('Manual profile insert:', e); }
             if (!currentProfile) {
                 currentProfile = {
                     id: currentUser.id,
@@ -62,7 +52,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // Try to load key + activity (never crash)
         try { await loadUserKey(); } catch (e) { console.error('loadUserKey:', e); }
         try { await loadActivity(); } catch (e) { console.error('loadActivity:', e); }
 
@@ -74,7 +63,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (loader) loader.style.display = 'none';
         if (main) main.style.display = 'grid';
 
-        // Fade-in
         document.querySelectorAll('.card, .stat-card').forEach((el, i) => {
             el.style.opacity = '0';
             el.style.transform = 'translateY(10px)';
@@ -183,8 +171,21 @@ function renderKey() {
         badge.className = 'badge ' + (plan === 'enterprise' ? 'badge-warning' : plan === 'pro' ? 'badge-info' : 'badge');
     }
 
-    const loader = '-- NexaKS Authentication Loader\nlocal license = "' + currentKey.key + '"\nlocal hwid = game:GetService("RbxAnalyticsService"):GetClientId()\nlocal response = game:HttpGet("' + window.location.origin + '/api/verify?license=" .. license .. "&hwid=" .. hwid)\nif response then loadstring(response)() end';
-    if ($('loaderScript')) $('loaderScript').value = loader;
+    // FIXED LOADER - with proper pcall error handling for Roblox
+    const loaderLines = [
+        '-- NexaKS Authentication Loader',
+        'local license = "' + currentKey.key + '"',
+        'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()',
+        'local url = "' + window.location.origin + '/api/verify?license=" .. license .. "&hwid=" .. hwid',
+        '',
+        'local ok, response = pcall(function() return game:HttpGet(url, true) end)',
+        'if not ok then warn("[NexaKS] Network error: " .. tostring(response)) return end',
+        'if not response or response == "" then warn("[NexaKS] Empty response from server") return end',
+        '',
+        'local success, err = pcall(function() loadstring(response)() end)',
+        'if not success then warn("[NexaKS] " .. tostring(err)) end'
+    ];
+    if ($('loaderScript')) $('loaderScript').value = loaderLines.join('\n');
 }
 
 async function loadActivity() {
