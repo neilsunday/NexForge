@@ -715,6 +715,8 @@ function openClearLogsModal() {
 
 function closeClearLogsModal() {
     document.getElementById('clearLogsModal')?.classList.remove('active');
+    const c = document.getElementById('clearLogsConfirm');
+    if (c) c.value = '';
 }
 
 async function executeClearLogs() {
@@ -727,26 +729,32 @@ async function executeClearLogs() {
         }
     }
 
+    // Close modal + reset input immediately
     closeClearLogsModal();
+    if (confirmInput) confirmInput.value = '';
+
     showToast('Clearing logs...', 'info');
 
     try {
-        let query = NexaKS.supabase.from('logs').delete();
+        let count = 0;
 
         if (scope === 'all') {
-            // Delete all (need a where clause for safety - use non-null id)
-            query = query.gte('id', 0);
+            // Nuclear option - delete every single log row
+            // Use a filter that matches all rows (id > 0 covers all bigserial IDs)
+            const { data, error } = await NexaKS.supabase
+                .from('logs').delete().gt('id', 0).select('id');
+            if (error) throw error;
+            count = data ? data.length : 0;
         } else {
             // Delete logs older than N days
             const days = parseInt(scope);
             const cutoff = new Date();
             cutoff.setDate(cutoff.getDate() - days);
-            query = query.lt('created_at', cutoff.toISOString());
+            const { data, error } = await NexaKS.supabase
+                .from('logs').delete().lt('created_at', cutoff.toISOString()).select('id');
+            if (error) throw error;
+            count = data ? data.length : 0;
         }
-
-        const { data, error } = await query.select('id');
-        if (error) throw error;
-        const count = data ? data.length : 0;
 
         // Log the cleanup action itself (irony intended)
         await NexaKS.supabase.from('logs').insert({
@@ -755,12 +763,12 @@ async function executeClearLogs() {
             status: 'success',
             metadata: {
                 message: scope === 'all'
-                    ? 'Cleared ALL logs (' + (count || 0) + ' entries)'
-                    : 'Cleared logs older than ' + scope + ' days (' + (count || 0) + ' entries)'
+                    ? 'Cleared ALL logs (' + count + ' entries)'
+                    : 'Cleared logs older than ' + scope + ' days (' + count + ' entries)'
             }
         });
 
-        showToast('Cleared ' + (count || 0) + ' log entries', 'success');
+        showToast('Cleared ' + count + ' log entries', 'success');
         await loadLogs();
         await loadStats();
     } catch (e) {
@@ -788,6 +796,8 @@ function openBulkDeleteModal() {
 
 function closeBulkDeleteModal() {
     document.getElementById('bulkDeleteModal')?.classList.remove('active');
+    const c = document.getElementById('bulkDeleteConfirm');
+    if (c) c.value = '';
 }
 
 async function executeBulkDelete() {
