@@ -165,12 +165,14 @@ function renderScriptRow(p, s) {
             </div>
         </td>
         <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
-        <td style="color:#d1d5db;">v${escapeHtml(s.version || '0.0.0.0')}</td>
+        <td style="color:#d1d5db;">v${escapeHtml(s.version || '0.0.0.0')} ${s.published_version_id ? '<span class="status-badge status-active">PUBLISHED</span>' : '<span class="status-badge status-free">DRAFT</span>'}</td>
         <td style="color:#a0a0b8; font-size:12px;">${lastEdit}</td>
         <td>
             <div class="table-actions">
-                <button class="btn-mini btn-loader" onclick="showLoader('${p.id}','${s.id}')">⬇ Loader</button>
-                <button class="btn-mini btn-edit" onclick="openScriptModal('${p.id}','${s.id}')">✎ Edit</button>
+                <button class="btn-mini btn-loader" onclick="showLoader('${p.id}','${s.id}')" ${s.published_version_id ? '' : 'disabled title="Publish first"'}>⬇ Loader</button>
+                <button class="btn-mini btn-edit" onclick="openScriptModal('${p.id}','${s.id}')">✎ Draft</button>
+                <button class="btn-mini btn-edit" onclick="publishScript('${p.id}','${s.id}')">▲ Publish</button>
+                <button class="btn-mini btn-loader" onclick="showVersionHistory('${p.id}','${s.id}')">History</button>
                 <button class="btn-mini btn-del" onclick="deleteScript('${p.id}','${s.id}')">🗑 Delete</button>
             </div>
         </td>
@@ -280,6 +282,53 @@ async function deleteScript(projectId, scriptId) {
         showToast('Script deleted','success');
         loadProjects();
     } catch (err) { showToast('Error: '+err.message,'error'); }
+}
+
+async function publishScript(projectId, scriptId) {
+    const notes = prompt('Publish notes (optional):', '') || '';
+    try {
+        await api(`/api/projects/${projectId}/scripts/${scriptId}/publish`, {
+            method:'POST', body:JSON.stringify({ notes })
+        });
+        showToast('Draft published','success');
+        await loadProjects();
+    } catch (err) { showToast('Publish failed: '+err.message,'error'); }
+}
+
+async function showVersionHistory(projectId, scriptId) {
+    const p = projectsCache.find(x => x.id === projectId);
+    const s = p?.scripts.find(x => x.id === scriptId);
+    if (!p || !s) return;
+    try {
+        const data = await api(`/api/projects/${projectId}/scripts/${scriptId}/versions`);
+        currentProject = p;
+        document.getElementById('setTitle').textContent = 'Version History — ' + s.name;
+        document.getElementById('setTabs').style.display = 'none';
+        const rows = (data.versions || []).map(v => {
+            const current = v.id === data.published_version_id;
+            return `<tr>
+                <td>v${escapeHtml(v.version)}</td>
+                <td>${current ? '<span class="status-badge status-active">LIVE</span>' : escapeHtml(v.state)}</td>
+                <td>${escapeHtml(v.publish_notes || '')}</td>
+                <td>${new Date(v.published_at).toLocaleString()}</td>
+                <td>${current ? '' : `<button class="btn-sm" onclick="rollbackScript('${projectId}','${scriptId}','${v.id}')">Rollback</button>`}</td>
+            </tr>`;
+        }).join('');
+        document.getElementById('setContent').innerHTML = rows
+            ? `<table class="data-table"><thead><tr><th>Version</th><th>State</th><th>Notes</th><th>Published</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+            : '<div class="empty-mini">No published versions yet.</div>';
+        document.getElementById('settingsModal').classList.add('show');
+    } catch (err) { showToast('History failed: '+err.message,'error'); }
+}
+
+async function rollbackScript(projectId, scriptId, versionId) {
+    if (!confirm('Make this version live again? Draft content will not be changed.')) return;
+    try {
+        await api(`/api/projects/${projectId}/scripts/${scriptId}/rollback/${versionId}`, { method:'POST' });
+        showToast('Rollback complete','success');
+        await loadProjects();
+        await showVersionHistory(projectId, scriptId);
+    } catch (err) { showToast('Rollback failed: '+err.message,'error'); }
 }
 
 // ---------- Loader snippet ----------
