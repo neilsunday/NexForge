@@ -4,9 +4,7 @@
    ======================================== */
 
 const {
-    Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes,
-    EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder,
-    ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle
+    Client, MessageFlags, GatewayIntentBits, SlashCommandBuilder, REST, Routes, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -195,42 +193,42 @@ client.on('interactionCreate', async (interaction) => {
             // /setup-panel (admin only)
             if (cmd === 'setup-panel') {
                 if (!(await isAdmin(interaction))) {
-                    return interaction.reply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)], ephemeral: true });
+                    return interaction.reply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)], flags: MessageFlags.Ephemeral });
                 }
                 const slug = interaction.options.getString('project');
                 let panelProject = null;
                 if (slug) {
                     const { data } = await sb.from('projects').select('*').eq('slug', slug.trim().toLowerCase()).maybeSingle();
-                    if (!data) return interaction.reply({ embeds: [embed('Not Found', 'No project with slug \`' + slug + '\`', 0xef4444)], ephemeral: true });
+                    if (!data) return interaction.reply({ embeds: [embed('Not Found', 'No project with slug \`' + slug + '\`', 0xef4444)], flags: MessageFlags.Ephemeral });
                     panelProject = data;
                 }
-                await interaction.reply({ content: 'Panel posted.', ephemeral: true });
+                await interaction.reply({ content: 'Panel posted.', flags: MessageFlags.Ephemeral });
                 await interaction.channel.send(buildPanel(panelProject));
                 return;
             }
 
             // /redeem (traditional slash)
             if (cmd === 'redeem') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 const key = interaction.options.getString('key').trim().toUpperCase();
                 return handleRedeem(interaction, key);
             }
 
             // /resethwid
             if (cmd === 'resethwid') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 return handleResetHwid(interaction);
             }
 
             // /keyinfo
             if (cmd === 'keyinfo') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 return handleKeyInfo(interaction);
             }
 
             // /generate (admin)
             if (cmd === 'generate') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
@@ -243,7 +241,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // /revoke (admin)
             if (cmd === 'revoke') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
@@ -253,7 +251,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // /lookup (admin)
             if (cmd === 'lookup') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
@@ -285,14 +283,14 @@ client.on('interactionCreate', async (interaction) => {
 
             // Get Script button (may carry :slug for a project)
             if (id === 'panel_script' || id.startsWith('panel_script:')) {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 const slug = id.includes(':') ? id.split(':')[1] : null;
                 return handleGetScript(interaction, slug);
             }
 
             // Get Role button
             if (id === 'panel_role') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 return handleGetRole(interaction);
             }
 
@@ -308,7 +306,7 @@ client.on('interactionCreate', async (interaction) => {
                         '**Cooldown:** 24 hours between resets.\n' +
                         '**Limit:** 5 resets total per key.', 0xf59e0b)],
                     components: [confirmRow],
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -328,7 +326,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // Get Stats button
             if (id === 'panel_stats') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 return handleKeyInfo(interaction);
             }
         }
@@ -336,7 +334,7 @@ client.on('interactionCreate', async (interaction) => {
         // ============ MODAL SUBMISSIONS ============
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'modal_redeem') {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 const key = interaction.fields.getTextInputValue('key_input').trim().toUpperCase();
                 return handleRedeem(interaction, key);
             }
@@ -345,7 +343,7 @@ client.on('interactionCreate', async (interaction) => {
     } catch (err) {
         console.error('Interaction error:', err);
         try {
-            const msg = { embeds: [embed('Error', 'Something went wrong: ' + err.message, 0xef4444)], ephemeral: true };
+            const msg = { embeds: [embed('Error', 'Something went wrong: ' + err.message, 0xef4444)], flags: MessageFlags.Ephemeral };
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(msg).catch(() => {});
             } else {
