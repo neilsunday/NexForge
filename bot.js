@@ -18,6 +18,14 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://miscyjgmvxbshvtiecuu.s
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SITE_URL = process.env.SITE_URL || 'https://keyora-gyuu.onrender.com';
 
+// Project slug -> Discord role ID mapping
+// Env vars override the defaults if set.
+const PROJECT_ROLE_MAP = {
+    macro:   process.env.DISCORD_ROLE_MACRO   || '1530196461730533556',
+    premium: process.env.DISCORD_ROLE_PREMIUM || '1530196527740358697',
+    private: process.env.DISCORD_ROLE_PRIVATE || '1530196626503897138'
+};
+
 if (!BOT_TOKEN || !CLIENT_ID) {
     console.error('Missing DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID');
     global.botStatus = 'error: missing config';
@@ -77,7 +85,18 @@ const commands = [
     new SlashCommandBuilder()
         .setName('lookup')
         .setDescription('[Admin] Look up a user')
+        .addUserOption(opt => opt.setName('user').setDescription('Discord user').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('setrole')
+        .setDescription('[Admin] Manually assign a project role to a user')
         .addUserOption(opt => opt.setName('user').setDescription('Discord user').setRequired(true))
+        .addStringOption(opt => opt.setName('project').setDescription('Which role').setRequired(true)
+            .addChoices(
+                { name: 'Macro', value: 'macro' },
+                { name: 'Private', value: 'private' },
+                { name: 'Premium', value: 'premium' }
+            ))
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -139,6 +158,28 @@ async function assignVerifiedRole(interaction) {
     } catch (err) {
         console.warn('Role assign failed:', err.message);
         return false;
+    }
+}
+
+// Assign a project-specific role (macro / private / premium) to a member.
+// Accepts either the interaction's member or a fetched GuildMember object.
+async function assignProjectRole(memberOrInteraction, projectSlug) {
+    if (!projectSlug) return { ok: false, reason: 'no_project' };
+    const slug = String(projectSlug).toLowerCase();
+    const roleId = PROJECT_ROLE_MAP[slug];
+    if (!roleId) return { ok: false, reason: 'no_role_configured', slug };
+
+    const member = memberOrInteraction?.member || memberOrInteraction;
+    if (!member || !member.roles || typeof member.roles.add !== 'function') {
+        return { ok: false, reason: 'no_member' };
+    }
+
+    try {
+        await member.roles.add(roleId);
+        return { ok: true, slug, roleId };
+    } catch (err) {
+        console.warn('Project role assign failed (' + slug + '):', err.message);
+        return { ok: false, reason: 'discord_error', error: err.message };
     }
 }
 
@@ -257,6 +298,17 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 const targetUser = interaction.options.getUser('user');
                 return handleLookup(interaction, targetUser);
+            }
+
+            // /setrole (admin) - manually assign a project role
+            if (cmd === 'setrole') {
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                if (!(await isAdmin(interaction))) {
+                    return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
+                }
+                const targetUser = interaction.options.getUser('user');
+                const projectSlug = interaction.options.getString('project');
+                return handleSetRole(interaction, targetUser, projectSlug);
             }
         }
 
@@ -389,6 +441,20 @@ async function handleRedeem(interaction, key) {
     // Auto-assign Verified role
     const roleAssigned = await assignVerifiedRole(interaction);
 
+    // Auto-assign project role (macro / private / premium) based on the key's project
+    let projectRoleLine = '';
+    if (existing.project_id) {
+        const { data: proj } = await sb.from('projects').select('slug, name').eq('id', existing.project_id).maybeSingle();
+        if (proj && proj.slug) {
+            const result = await assignProjectRole(interaction, proj.slug);
+            if (result.ok) {
+                projectRoleLine = '**' + proj.slug.charAt(0).toUpperCase() + proj.slug.slice(1) + '** role assigned.\n';
+            } else if (result.reason === 'no_role_configured') {
+                projectRoleLine = 'No role configured for project `' + proj.slug + '`.\n';
+            }
+        }
+    }
+
     const expText = updates.expires_at
         ? new Date(updates.expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : 'Lifetime';
@@ -399,6 +465,7 @@ async function handleRedeem(interaction, key) {
             '**Expires:** ' + expText + '\n' +
             '**Key:** `' + key + '`\n\n' +
             (roleAssigned ? 'Verified role assigned.\n' : '') +
+            projectRoleLine +
             'Click **Get Script** to receive your loader.', 0x10b981)]
     });
 }
@@ -682,6 +749,45 @@ async function handleLookup(interaction, targetUser) {
         '**Banned:** ' + (user.is_banned ? 'Yes' : 'No') + '\n' +
         '**Total keys:** ' + (keys?.length || 0) + ' (' + active.length + ' active, ' + revoked.length + ' revoked)\n\n' +
         '**Active Keys:**\n' + keySummary, 0x7c3aed)] });
+}
+
+async function handleSetRole(interaction, targetUser, projectSlug) {
+    if (!PROJECT_ROLE_MAP[projectSlug]) {
+        return interaction.editReply({ embeds: [embed('Not Configured',
+            'No role ID configured for `' + projectSlug + '`. Set `DISCORD_ROLE_' + projectSlug.toUpperCase() + '` in env.', 0xef4444)] });
+    }
+
+    // Fetch the guild member for the target user
+    let targetMember;
+    try {
+        targetMember = await interaction.guild.members.fetch(targetUser.id);
+    } catch (err) {
+        return interaction.editReply({ embeds: [embed('Not Found',
+            targetUser.username + ' is not a member of this server.', 0xef4444)] });
+    }
+
+    const result = await assignProjectRole(targetMember, projectSlug);
+    if (!result.ok) {
+        const msg = result.reason === 'discord_error'
+            ? 'Discord rejected the role assignment: ' + result.error + '\n\nMake sure the bot role is above the target role in Server Settings > Roles.'
+            : 'Failed: ' + result.reason;
+        return interaction.editReply({ embeds: [embed('Assignment Failed', msg, 0xef4444)] });
+    }
+
+    // Log it
+    const admin = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: admin?.id,
+        action: 'admin_setrole', status: 'success',
+        metadata: {
+            message: 'Assigned ' + projectSlug + ' role to ' + targetUser.username + ' by ' + interaction.user.username,
+            target_discord_id: targetUser.id,
+            project: projectSlug
+        }
+    });
+
+    return interaction.editReply({ embeds: [embed('Role Assigned',
+        '<@' + targetUser.id + '> now has the **' + projectSlug.charAt(0).toUpperCase() + projectSlug.slice(1) + '** role.', 0x10b981)] });
 }
 
 // ========== Startup ==========
