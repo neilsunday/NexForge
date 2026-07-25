@@ -182,6 +182,7 @@ async function loadScripts() {
             <td><span class="badge ${s.status === 'published' ? 'badge-success' : 'badge-warning'}">${s.status}</span></td>
             <td>
                 <button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" onclick="showLoader('${s.id}')">Loader</button>
+                <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="openUpdateScript('${s.id}')">Update</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="togglePublish('${s.id}','${s.status}')">${s.status === 'published' ? 'Unpublish' : 'Publish'}</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="deleteScript('${s.id}')">Delete</button>
             </td>
@@ -220,6 +221,49 @@ async function deleteScript(id) {
     const { error } = await NexaKS.supabase.from('project_scripts').delete().eq('id', id);
     if (error) return showToast('Delete failed', 'error');
     showToast('Script deleted', 'success');
+    await loadScripts();
+}
+
+// ---------- Update script (blind replace) ----------
+let updateScriptId = null;
+function openUpdateScript(scriptId) {
+    const s = projScripts.find(x => x.id === scriptId);
+    if (!s) return;
+    updateScriptId = scriptId;
+    document.getElementById('updateScriptTitle').textContent = 'Update: ' + s.name;
+    document.getElementById('updateScriptVersion').value = bumpVersion(s.version || '1.0.0');
+    document.getElementById('updateScriptContent').value = '';
+    document.getElementById('updateModal')?.classList.add('active');
+    setTimeout(() => document.getElementById('updateScriptContent')?.focus(), 100);
+}
+function closeUpdateModal() {
+    document.getElementById('updateModal')?.classList.remove('active');
+    updateScriptId = null;
+}
+function bumpVersion(v) {
+    // 1.0.0 -> 1.0.1
+    const parts = String(v || '1.0.0').split('.').map(x => parseInt(x) || 0);
+    while (parts.length < 3) parts.push(0);
+    parts[parts.length - 1]++;
+    return parts.join('.');
+}
+async function confirmUpdateScript() {
+    if (!updateScriptId) return;
+    const content = document.getElementById('updateScriptContent')?.value;
+    const version = document.getElementById('updateScriptVersion')?.value.trim() || null;
+    if (!content || !content.trim()) return showToast('New script content is required', 'error');
+
+    showToast('Updating script...', 'info');
+    const { error } = await NexaKS.supabase.from('project_scripts')
+        .update({
+            script_content: content,
+            version: version,
+            updated_at: new Date().toISOString()
+        })
+        .eq('id', updateScriptId);
+    if (error) return showToast('Update failed: ' + error.message, 'error');
+    closeUpdateModal();
+    showToast('Script updated - clients get the new version on next execution', 'success');
     await loadScripts();
 }
 
@@ -403,4 +447,4 @@ function showToast(message, type) {
     }, 3500);
 }
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCreateModal(); closeDiscordModal(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCreateModal(); closeDiscordModal(); closeUpdateModal(); } });
