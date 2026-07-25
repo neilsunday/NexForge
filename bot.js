@@ -199,18 +199,15 @@ function generateKeyString() {
 
 // ========== Panel builder ==========
 function buildPanel(project) {
-    const titleName = project ? project.name : 'NexaKS Script Portal';
-    const slugLine = project ? ('\n**Project:** `' + project.slug + '`') : '';
+    // Project slug still routes the Get Script button, hidden from the embed text.
     const scriptBtnId = project ? ('panel_script:' + project.slug) : 'panel_script';
     const panelEmbed = new EmbedBuilder()
-        .setColor(0x7c3aed)
-        .setTitle(titleName)
+        .setColor(0x2b2d31)
+        .setTitle('ð–­ð–¾ð—‘ð–º ð–ªð–¾ð—’ ð–¯ð—‹ð—ˆð—ƒð–¾ð–¼ð—')
         .setDescription(
-            'Redeem your key, claim your buyer role, or get your Roblox loader script from this panel.' + slugLine + '\n\n' +
-            'HWID resets are limited to once every 24 hours (first reset requires 24 hours after redeem).\n\n' +
-            '**Warning:** Sharing your key or loader script may result in permanent revocation and ban.'
+            'ð–±ð–¾ð–½ð–¾ð–¾ð—† ð—’ð—ˆð—Žð—‹ ð—„ð–¾ð—’, ð–¼ð—…ð–ºð—‚ð—† ð—’ð—ˆð—Žð—‹ ð–»ð—Žð—’ð–¾ð—‹ ð—‹ð—ˆð—…ð–¾, ð—ˆð—‹ ð—€ð–¾ð— ð—’ð—ˆð—Žð—‹ ð—Œð–¼ð—‹ð—‚ð—‰ð— ð—…ð—ˆð–ºð–½ð–¾ð—‹ ð–¿ð—‹ð—ˆð—† ð—ð—ð—‚ð—Œ ð—‰ð–ºð—‡ð–¾ð—….\n\nð–§ð–¶ð–¨ð–£ ð—‹ð–¾ð—Œð–¾ð—ð—Œ ð–ºð—‹ð–¾ ð—…ð—‚ð—†ð—‚ð—ð–¾ð–½ ð—ð—ˆ ð—ˆð—‡ð–¼ð–¾ ð–¾ð—ð–¾ð—‹ð—’ ðŸ£ðŸ§ ð—ð—ˆð—Žð—‹ð—Œ â€“ Fð—‚ð—‹ð—Œð— ð—‹ð–¾ð—Œð–¾ð— ð–»ð–¾ð–¼ð—ˆð—†ð–¾ð—Œ ð–ºð—ð–ºð—‚ð—…ð–ºð–»ð—…ð–¾ ðŸ£ðŸ§ ð—ð—ˆð—Žð—‹ð—Œ ð–ºð–¿ð—ð–¾ð—‹ ð—‹ð–¾ð–½ð–¾ð–¾ð—†ð—‚ð—‡ð—€ ð—’ð—ˆð—Žð—‹ ð—„ð–¾ð—’.\n\nð–¶ð–ºð—‹ð—‡ð—‚ð—‡ð—€: ð–²ð—ð–ºð—‹ð—‚ð—‡ð—€ ð—’ð—ˆð—Žð—‹ ð—„ð–¾ð—’ ð—ˆð—‹ ð—…ð—ˆð–ºð–½ð–¾ð—‹ ð—Œð–¼ð—‹ð—‚ð—‰ð— ð—†ð–ºð—’ ð—‹ð–¾ð—Œð—Žð—…ð— ð—‚ð—‡ ð—ð—ð–¾ ð—…ð—ˆð—Œð—Œ ð—ˆð–¿ ð—’ð—ˆð—Žð—‹ ð—„ð–¾ð—’ ð—ˆð—‹ ð–º ð—‰ð–¾ð—‹ð—†ð–ºð—‡ð–¾ð—‡ð— ð–»ð–ºð—‡.'
         )
-        .setFooter({ text: 'NexaKS | HWID-locked authentication' })
+        .setFooter({ text: 'ð–­ð–¾ð—‘ð–º ð–³ð–¾ð–ºð—†' })
         .setTimestamp();
 
     const row1 = new ActionRowBuilder().addComponents(
