@@ -689,3 +689,173 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('scriptModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'scriptModal') closeScriptModal();
 });
+
+
+// ========== Clear Logs ==========
+function openClearLogsModal() {
+    const modal = document.getElementById('clearLogsModal');
+    const scope = document.getElementById('clearLogsScope');
+    const confirmWrap = document.getElementById('clearLogsConfirmWrap');
+    const confirmInput = document.getElementById('clearLogsConfirm');
+    if (!modal) return;
+
+    // Reset state
+    if (scope) scope.value = '7';
+    if (confirmInput) confirmInput.value = '';
+
+    // Show confirm field only for "all" scope
+    const updateConfirmVisibility = () => {
+        if (confirmWrap) confirmWrap.style.display = scope.value === 'all' ? 'block' : 'none';
+    };
+    updateConfirmVisibility();
+    scope?.addEventListener('change', updateConfirmVisibility);
+
+    modal.classList.add('active');
+}
+
+function closeClearLogsModal() {
+    document.getElementById('clearLogsModal')?.classList.remove('active');
+}
+
+async function executeClearLogs() {
+    const scope = document.getElementById('clearLogsScope')?.value || '7';
+    const confirmInput = document.getElementById('clearLogsConfirm');
+
+    if (scope === 'all') {
+        if (confirmInput?.value !== 'DELETE') {
+            return showToast('Type DELETE to confirm total wipe', 'error');
+        }
+    }
+
+    closeClearLogsModal();
+    showToast('Clearing logs...', 'info');
+
+    try {
+        let query = NexaKS.supabase.from('logs').delete();
+
+        if (scope === 'all') {
+            // Delete all (need a where clause for safety - use non-null id)
+            query = query.gte('id', 0);
+        } else {
+            // Delete logs older than N days
+            const days = parseInt(scope);
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - days);
+            query = query.lt('created_at', cutoff.toISOString());
+        }
+
+        const { error, count } = await query.select('id', { count: 'exact', head: true });
+        if (error) throw error;
+
+        // Log the cleanup action itself (irony intended)
+        await NexaKS.supabase.from('logs').insert({
+            user_id: currentUser.id,
+            action: 'admin_clear_logs',
+            status: 'success',
+            metadata: {
+                message: scope === 'all'
+                    ? 'Cleared ALL logs (' + (count || 0) + ' entries)'
+                    : 'Cleared logs older than ' + scope + ' days (' + (count || 0) + ' entries)'
+            }
+        });
+
+        showToast('Cleared ' + (count || 0) + ' log entries', 'success');
+        await loadLogs();
+        await loadStats();
+    } catch (e) {
+        console.error('Clear logs:', e);
+        showToast('Clear failed: ' + e.message, 'error');
+    }
+}
+
+// ========== Bulk Delete Keys ==========
+function openBulkDeleteModal() {
+    const modal = document.getElementById('bulkDeleteModal');
+    const scope = document.getElementById('bulkDeleteScope');
+    const confirmWrap = document.getElementById('bulkDeleteConfirmWrap');
+    const confirmInput = document.getElementById('bulkDeleteConfirm');
+    if (!modal) return;
+
+    if (scope) scope.value = 'unclaimed';
+    if (confirmInput) confirmInput.value = '';
+
+    // Always require DELETE confirmation for key deletion (destructive)
+    if (confirmWrap) confirmWrap.style.display = 'block';
+
+    modal.classList.add('active');
+}
+
+function closeBulkDeleteModal() {
+    document.getElementById('bulkDeleteModal')?.classList.remove('active');
+}
+
+async function executeBulkDelete() {
+    const scope = document.getElementById('bulkDeleteScope')?.value || 'unclaimed';
+    const confirmInput = document.getElementById('bulkDeleteConfirm');
+
+    if (confirmInput?.value !== 'DELETE') {
+        return showToast('Type DELETE to confirm', 'error');
+    }
+
+    closeBulkDeleteModal();
+    showToast('Deleting keys...', 'info');
+
+    try {
+        let statusFilter;
+        let scopeLabel;
+        if (scope === 'unclaimed') {
+            statusFilter = ['unclaimed'];
+            scopeLabel = 'unclaimed';
+        } else if (scope === 'revoked') {
+            statusFilter = ['revoked'];
+            scopeLabel = 'revoked';
+        } else if (scope === 'expired') {
+            statusFilter = ['expired'];
+            scopeLabel = 'expired';
+        } else if (scope === 'unclaimed_revoked') {
+            statusFilter = ['unclaimed', 'revoked'];
+            scopeLabel = 'unclaimed + revoked';
+        }
+
+        // Safety: never delete active keys via bulk
+        const { data, error, count } = await NexaKS.supabase
+            .from('keys').delete()
+            .in('status', statusFilter)
+            .select('key', { count: 'exact' });
+
+        if (error) throw error;
+
+        await NexaKS.supabase.from('logs').insert({
+            user_id: currentUser.id,
+            action: 'admin_bulk_delete',
+            status: 'success',
+            metadata: {
+                message: 'Bulk deleted ' + (count || 0) + ' ' + scopeLabel + ' keys'
+            }
+        });
+
+        showToast('Deleted ' + (count || 0) + ' keys', 'success');
+        await loadKeys();
+        await loadStats();
+        await loadLogs();
+    } catch (e) {
+        console.error('Bulk delete:', e);
+        showToast('Delete failed: ' + e.message, 'error');
+    }
+}
+
+// Modal overlay click handlers
+document.getElementById('clearLogsModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'clearLogsModal') closeClearLogsModal();
+});
+document.getElementById('bulkDeleteModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'bulkDeleteModal') closeBulkDeleteModal();
+});
+
+// ESC key handling for new modals
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeClearLogsModal();
+        closeBulkDeleteModal();
+    }
+});
