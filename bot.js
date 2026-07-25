@@ -179,8 +179,7 @@ function buildPanel(project) {
 
     const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID (24h)').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('panel_stats').setLabel('Session Status').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setLabel('Open Dashboard').setStyle(ButtonStyle.Link).setURL(SITE_URL + '/dashboard')
+        new ButtonBuilder().setCustomId('panel_stats').setLabel('Session Status').setStyle(ButtonStyle.Secondary)
     );
 
     return { embeds: [panelEmbed], components: [row1, row2] };
@@ -645,7 +644,7 @@ async function handleGenerate(interaction, plan, duration, qty, projSlug) {
     const projLine = project ? '\n**Project:** ' + project.name + ' (\`' + project.slug + '\`)' : '\n**Project:** none (unattached)';
     return interaction.editReply({ embeds: [embed('Keys Generated',
         'Generated **' + qty + '** ' + plan.toUpperCase() + ' keys (' + duration + ')' + projLine + '\n\n' +
-        keys.map(k => '\`' + k + '\`').join('\n') + '\n\n*Save these - hindi na uulit yung display.*', 0x10b981)] });
+        keys.map(k => '\`' + k + '\`').join('\n') + '\n\n*Save these - they will not be shown again.*', 0x10b981)] });
 }
 
 async function handleRevoke(interaction, key) {
