@@ -326,6 +326,88 @@ async function logProject(projectId, userId, key, action, status, message, ip) {
     }
 }
 
+// ========================================
+// /api/load/:slug - PUBLIC KEYLESS / KEY LOADER
+// Keyless scripts run without a key. Key-based scripts require ?key=NXKS-...
+// Usage: loadstring(game:HttpGet(".../api/load/myproject?script=abcd1234"))()
+// ========================================
+app.get('/api/load/:slug', async (req, res) => {
+    const slug = (req.params.slug || '').trim().toLowerCase();
+    const loadId = req.query.script ? String(req.query.script).trim() : null;
+    const key = req.query.key ? String(req.query.key).trim().toUpperCase() : null;
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+
+    if (!sb) {
+        return res.status(500).type('text/plain').send('error("NexaKS: Server not configured")');
+    }
+
+    try {
+        // Fetch the published script for this project slug
+        const { data, error } = await sb.rpc('get_public_script', {
+            p_slug: slug, p_load_id: loadId
+        });
+        if (error || !data || data.length === 0) {
+            return res.status(200).type('text/plain').send('error("NexaKS: Script not found or not published")');
+        }
+        const script = data[0];
+
+        // Project must be active
+        if (script.project_status !== 'active') {
+            return res.status(200).type('text/plain').send('error("NexaKS: This project is currently ' + script.project_status + '")');
+        }
+
+        // Keyless -> serve immediately
+        if (script.keyless) {
+            sb.from('project_scripts').update({
+                execution_count: (script.execution_count || 0) + 1
+            }).eq('id', script.id).then(() => {}, () => {});
+            await logProject(script.project_id, null, key || 'keyless', 'load', 'success', 'Keyless load', clientIp);
+            return res.status(200).type('text/plain').send(script.script_content);
+        }
+
+        // Key-based -> require a valid, active key bound to this project
+        if (!key) {
+            return res.status(200).type('text/plain').send('error("NexaKS: This script requires a license key")');
+        }
+        const { data: keyRow } = await sb.from('keys')
+            .select('*, users!keys_user_id_fkey(is_banned)')
+            .eq('key', key).maybeSingle();
+
+        if (!keyRow || keyRow.status !== 'active') {
+            await logProject(script.project_id, keyRow?.user_id || null, key, 'load_fail', 'failed', 'Invalid/inactive key', clientIp);
+            return res.status(200).type('text/plain').send('error("NexaKS: Invalid or inactive license key")');
+        }
+        if (keyRow.users?.is_banned) {
+            return res.status(200).type('text/plain').send('error("NexaKS: Account suspended")');
+        }
+        if (keyRow.project_id && keyRow.project_id !== script.project_id) {
+            return res.status(200).type('text/plain').send('error("NexaKS: Key not valid for this project")');
+        }
+
+        // Blacklist check
+        const { data: bans } = await sb.from('project_blacklist')
+            .select('type,value').eq('project_id', script.project_id);
+        const blocked = (bans || []).some(b =>
+            (b.type === 'ip' && b.value === clientIp) ||
+            (b.type === 'user' && b.value === keyRow.user_id)
+        );
+        if (blocked) {
+            await logProject(script.project_id, keyRow.user_id, key, 'load_fail', 'failed', 'Blacklisted', clientIp);
+            return res.status(200).type('text/plain').send('error("NexaKS: Access denied - blacklisted")');
+        }
+
+        sb.from('project_scripts').update({
+            execution_count: (script.execution_count || 0) + 1
+        }).eq('id', script.id).then(() => {}, () => {});
+        await logProject(script.project_id, keyRow.user_id, key, 'load', 'success', 'Key load', clientIp);
+        return res.status(200).type('text/plain').send(script.script_content);
+
+    } catch (err) {
+        console.error('Load error:', err);
+        return res.status(500).type('text/plain').send('error("NexaKS: Server error")');
+    }
+});
+
 // 404 handler
 app.use((req, res) => {
     if (req.accepts('html')) return res.redirect('/');
