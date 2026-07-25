@@ -533,6 +533,35 @@ function generateKeyString() {
   return "NXKS-" + segments.join("-");
 }
 
+// Resolve the users.id that corresponds to the signed-in admin.
+// Ensures we have a valid users row before inserting a key (keys.created_by has a FK to users.id).
+async function resolveAdminUserId() {
+  // 1. Match by auth id â€” common case for web-first admins
+  const { data: byId } = await NexaKS.supabase
+    .from("users").select("id").eq("id", currentUser.id).maybeSingle();
+  if (byId) return byId.id;
+
+  // 2. Match by discord_id from OAuth metadata (admin used /redeem on Discord first)
+  const meta = currentUser.user_metadata || {};
+  const discordId = meta.provider_id || meta.sub;
+  if (discordId) {
+    const { data: byDiscord } = await NexaKS.supabase
+      .from("users").select("id").eq("discord_id", discordId).maybeSingle();
+    if (byDiscord) return byDiscord.id;
+  }
+
+  // 3. Create a fresh row keyed by the auth id
+  const { data: created, error } = await NexaKS.supabase.from("users").insert({
+    id: currentUser.id,
+    discord_id: discordId || null,
+    username: meta.full_name || meta.name || meta.user_name || "Admin",
+    avatar_url: meta.avatar_url || null,
+    is_admin: true,
+  }).select("id").single();
+  if (error) throw new Error("Could not resolve admin profile: " + error.message);
+  return created.id;
+}
+
 async function generateKeys() {
   const btn = document.getElementById("genBtn");
   const qty = parseInt(document.getElementById("genQty").value) || 1;
@@ -553,32 +582,46 @@ async function generateKeys() {
   );
 
   try {
-    const keys = [];
-    const rows = [];
-    for (let i = 0; i < qty; i++) {
-      const key = generateKeyString();
-      keys.push(key);
-      rows.push({
-        key: key,
-        plan: plan,
-        duration_days: duration === "lifetime" ? null : parseInt(duration),
-        hwid_reset_limit: resets,
-        status: "unclaimed",
-        created_by: currentUser.id,
-        project_id: projectId || null,
-      });
+    // Make sure the admin has a users row (needed for keys.created_by FK)
+    const adminId = await resolveAdminUserId();
+
+    // Generate unique key strings â€” retry on in-batch collisions
+    const keySet = new Set();
+    let attempts = 0;
+    while (keySet.size < qty && attempts < qty * 10) {
+      keySet.add(generateKeyString());
+      attempts++;
     }
+    if (keySet.size < qty) {
+      throw new Error("Could not generate " + qty + " unique keys");
+    }
+    const keys = Array.from(keySet);
+
+    const rows = keys.map((key) => ({
+      key: key,
+      plan: plan,
+      duration_days: duration === "lifetime" ? null : parseInt(duration),
+      hwid_reset_limit: resets,
+      status: "unclaimed",
+      created_by: adminId,
+      project_id: projectId || null,
+    }));
 
     const { error } = await NexaKS.supabase.from("keys").insert(rows);
-    if (error) throw error;
+    if (error) {
+      // Surface the real reason (FK violation, unique collision, RLS, etc.)
+      const detail = error.message + (error.details ? " (" + error.details + ")" : "");
+      throw new Error(detail);
+    }
 
     // Log it
     await NexaKS.supabase.from("logs").insert({
-      user_id: currentUser.id,
+      user_id: adminId,
       action: "admin_generate",
       status: "success",
       metadata: {
-        message: "Generated " + qty + " " + plan + " keys (" + duration + ")",
+        message: "Generated " + qty + " " + plan + " keys (" + duration + ")" +
+                 (projectId ? " for project " + projectId : ""),
       },
     });
 
