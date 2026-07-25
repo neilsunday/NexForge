@@ -44,7 +44,8 @@ const client = new Client({
 const commands = [
     new SlashCommandBuilder()
         .setName('setup-panel')
-        .setDescription('[Admin] Post the NexaKS interactive panel in this channel'),
+        .setDescription('[Admin] Post the NexaKS interactive panel in this channel')
+        .addStringOption(opt => opt.setName('project').setDescription('Project slug (ties panel to one project)').setRequired(false)),
 
     new SlashCommandBuilder()
         .setName('redeem')
@@ -154,18 +155,16 @@ function generateKeyString() {
 }
 
 // ========== Panel builder ==========
-function buildPanel() {
+function buildPanel(project) {
+    const titleName = project ? project.name : 'NexaKS Script Portal';
+    const slugLine = project ? ('\n**Project:** `' + project.slug + '`') : '';
+    const scriptBtnId = project ? ('panel_script:' + project.slug) : 'panel_script';
     const panelEmbed = new EmbedBuilder()
         .setColor(0x7c3aed)
-        .setTitle('NexaKS Script Portal')
+        .setTitle(titleName)
         .setDescription(
-            'Welcome to **NexaKS** â€” enterprise-grade script authentication.\n\n' +
-            'Click the buttons below to manage your license:\n\n' +
-            '**Redeem Key** - Activate your license\n' +
-            '**Get Script** - Receive your personalized loader\n' +
-            '**Reset HWID** - Change device (24h cooldown)\n' +
-            '**Get Stats** - View your license details\n' +
-            '**Get Role** - Claim your Verified role\n\n' +
+            'Redeem your key, claim your buyer role, or get your Roblox loader script from this panel.' + slugLine + '\n\n' +
+            'HWID resets are limited to once every 24 hours (first reset requires 24 hours after redeem).\n\n' +
             '**Warning:** Sharing your key or loader script may result in permanent revocation and ban.'
         )
         .setFooter({ text: 'NexaKS | HWID-locked authentication' })
@@ -173,13 +172,13 @@ function buildPanel() {
 
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('panel_redeem').setLabel('Redeem Key').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('panel_script').setLabel('Get Script').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('panel_role').setLabel('Get Role').setStyle(ButtonStyle.Primary)
+        new ButtonBuilder().setCustomId('panel_role').setLabel('Get Role').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(scriptBtnId).setLabel('Get Script').setStyle(ButtonStyle.Secondary)
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('panel_stats').setLabel('Get Stats').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID (24h)').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('panel_stats').setLabel('Session Status').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setLabel('Open Dashboard').setStyle(ButtonStyle.Link).setURL(SITE_URL + '/dashboard')
     );
 
@@ -198,8 +197,15 @@ client.on('interactionCreate', async (interaction) => {
                 if (!(await isAdmin(interaction))) {
                     return interaction.reply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)], ephemeral: true });
                 }
+                const slug = interaction.options.getString('project');
+                let panelProject = null;
+                if (slug) {
+                    const { data } = await sb.from('projects').select('*').eq('slug', slug.trim().toLowerCase()).maybeSingle();
+                    if (!data) return interaction.reply({ embeds: [embed('Not Found', 'No project with slug \`' + slug + '\`', 0xef4444)], ephemeral: true });
+                    panelProject = data;
+                }
                 await interaction.reply({ content: 'Panel posted.', ephemeral: true });
-                await interaction.channel.send(buildPanel());
+                await interaction.channel.send(buildPanel(panelProject));
                 return;
             }
 
@@ -276,10 +282,11 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.showModal(modal);
             }
 
-            // Get Script button
-            if (id === 'panel_script') {
+            // Get Script button (may carry :slug for a project)
+            if (id === 'panel_script' || id.startsWith('panel_script:')) {
                 await interaction.deferReply({ ephemeral: true });
-                return handleGetScript(interaction);
+                const slug = id.includes(':') ? id.split(':')[1] : null;
+                return handleGetScript(interaction, slug);
             }
 
             // Get Role button
