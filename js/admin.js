@@ -143,7 +143,7 @@ async function loadKeys() {
             .from('keys')
             .select('*, users!keys_user_id_fkey(username, avatar_url)')
             .order('created_at', { ascending: false })
-            .limit(200);
+            .limit(50);
 
         if (error) throw error;
         allKeys = data || [];
@@ -334,7 +334,7 @@ async function loadLogs() {
             .from('logs')
             .select('*, users!logs_user_id_fkey(username)')
             .order('created_at', { ascending: false })
-            .limit(100);
+            .limit(10);
 
         if (error) throw error;
 
