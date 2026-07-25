@@ -213,15 +213,17 @@ function generateKeyString() {
 function buildPanel(project) {
     // Project slug still routes the Get Script button, hidden from the embed text.
     const scriptBtnId = project ? ('panel_script:' + project.slug) : 'panel_script';
+    // Dynamic header - uses the project's display name, falls back if unattached.
+    const headerName = project ? project.name : 'Nexa Key Project';
     const panelEmbed = new EmbedBuilder()
         .setColor(0x2b2d31)
         .setDescription(
+            '# ' + headerName + '\n' +
             'Redeem your key, claim your buyer role, or get your script loader from this panel.\n\n' +
-            'HWID resets are limited to once every 15 hours - First reset becomes available 15 hours after redeeming your key.\n\n' +
+            '**HWID resets** are limited to once every **15 hours** - First reset becomes available 15 hours after redeeming your key.\n\n' +
             '**Warning:** Sharing your key or loader script may result in the loss of your key or a permanent ban.'
         )
-        .setFooter({ text: 'Nexa Team' })
-        .setTimestamp();
+        .setFooter({ text: 'Nexa Team' });
 
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('panel_redeem').setLabel('Redeem Key').setStyle(ButtonStyle.Success),
