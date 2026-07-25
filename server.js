@@ -49,10 +49,10 @@ setInterval(() => {
 
 // ---- Lua-safe string literal encoder (prevents loader injection) ----
 function luaStr(s) {
-    return '"' + String(s == null ? '' : s)
-        .replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n').replace(/\r/g, '\\r')
-        .replace(/\u2028/g, '').replace(/\u2029/g, '') + '"';
+    // JSON.stringify produces a valid double-quoted literal with all
+    // control chars, quotes and backslashes escaped. Lua accepts the
+    // same escapes (\", \\, \n, \r, \t, \uXXXX). No hand-managed slashes.
+    return JSON.stringify(String(s == null ? '' : s));
 }
 function luaError(msg) { return 'error(' + luaStr('NexaKS: ' + msg) + ')'; }
 
