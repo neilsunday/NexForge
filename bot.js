@@ -191,10 +191,51 @@ function isOwner(interaction) {
 }
 
 async function ensureUserRow(discordUser) {
-    const { data: existing } = await sb.from('users')
+    // 1. Look up by discord_id first (fast path for existing users)
+    const { data: existingByDiscord } = await sb.from('users')
         .select('*').eq('discord_id', discordUser.id).maybeSingle();
-    if (existing) return existing;
+    if (existingByDiscord) return existingByDiscord;
 
+    // 2. Try to find a web-side row that hasn't been linked to Discord yet.
+    // Supabase Auth stores the Discord user id under raw_user_meta_data.provider_id
+    // when a user signs in with the Discord OAuth provider. If we find a match,
+    // reuse that row and stamp the discord_id onto it.
+    try {
+        const { data: authList } = await sb.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        const authUser = authList?.users?.find(u => {
+            const meta = u.user_metadata || u.raw_user_meta_data || {};
+            return meta.provider_id === discordUser.id || meta.sub === discordUser.id;
+        });
+        if (authUser) {
+            // Row may already exist keyed by the auth id â€” just add discord_id + return
+            const { data: rowById } = await sb.from('users')
+                .select('*').eq('id', authUser.id).maybeSingle();
+            if (rowById) {
+                if (!rowById.discord_id) {
+                    await sb.from('users').update({
+                        discord_id: discordUser.id,
+                        username: rowById.username || discordUser.username || discordUser.globalName || 'User',
+                        avatar_url: rowById.avatar_url || (discordUser.displayAvatarURL ? discordUser.displayAvatarURL() : null)
+                    }).eq('id', authUser.id);
+                }
+                return { ...rowById, discord_id: discordUser.id };
+            }
+            // Auth user exists but no profile row yet â€” create one using the auth id
+            const { data: linked, error: linkErr } = await sb.from('users').insert({
+                id: authUser.id,
+                discord_id: discordUser.id,
+                username: discordUser.username || discordUser.globalName || 'User',
+                avatar_url: discordUser.displayAvatarURL ? discordUser.displayAvatarURL() : null
+            }).select().single();
+            if (!linkErr && linked) return linked;
+            console.error('Link-to-auth insert failed:', linkErr);
+        }
+    } catch (e) {
+        // listUsers may fail (permissions, network) â€” fall through to plain insert
+        console.warn('Auth link lookup skipped:', e.message);
+    }
+
+    // 3. Plain insert for Discord-first users (requires users_id_fkey to be dropped)
     const { data: created, error } = await sb.from('users').insert({
         id: require('crypto').randomUUID(),
         discord_id: discordUser.id,
@@ -202,7 +243,14 @@ async function ensureUserRow(discordUser) {
         avatar_url: discordUser.displayAvatarURL ? discordUser.displayAvatarURL() : null
     }).select().single();
 
-    if (error) { console.error('Create user row:', error); return null; }
+    if (error) {
+        console.error('Create user row:', error);
+        // Attach the error message so callers can surface it in the reply
+        const err = new Error(error.message || 'Insert failed');
+        err.pgCode = error.code;
+        err.pgDetails = error.details;
+        throw err;
+    }
     return created;
 }
 
@@ -552,7 +600,16 @@ async function handleRedeem(interaction, key) {
         return interaction.editReply({ embeds: [embed('Invalid Format', 'Keys start with `NXKS-`', 0xef4444)] });
     }
 
-    const user = await ensureUserRow(interaction.user);
+    let user;
+    try {
+        user = await ensureUserRow(interaction.user);
+    } catch (err) {
+        return interaction.editReply({ embeds: [embed('Profile Error',
+            'Could not create your profile.\n\n' +
+            '**Reason:** ' + (err.message || 'Unknown error') + '\n' +
+            (err.pgCode ? '**Code:** `' + err.pgCode + '`\n' : '') +
+            '\nContact an admin if this keeps happening.', 0xef4444)] });
+    }
     if (!user) return interaction.editReply({ embeds: [embed('Error', 'Could not create profile.', 0xef4444)] });
 
     const { data: existing } = await sb.from('keys').select('*').eq('key', key).maybeSingle();
