@@ -30,6 +30,51 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(__dirname));
 
+// ========== Simple in-memory rate limiter ==========
+// Keyed by ip+license. Not distributed — good enough for single-instance;
+// Phase 11 can swap to a shared store. Prevents brute force / enumeration.
+const _rl = new Map();
+function rateLimit(bucketKey, max, windowMs) {
+    const now = Date.now();
+    let e = _rl.get(bucketKey);
+    if (!e || now > e.reset) { e = { count: 0, reset: now + windowMs }; _rl.set(bucketKey, e); }
+    e.count++;
+    return e.count <= max;
+}
+// periodic cleanup
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of _rl) if (now > v.reset) _rl.delete(k);
+}, 60000).unref?.();
+
+// ---- Lua-safe string literal encoder (prevents loader injection) ----
+function luaStr(s) {
+    return '"' + String(s == null ? '' : s)
+        .replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+        .replace(/\u2028/g, '').replace(/\u2029/g, '') + '"';
+}
+function luaError(msg) { return 'error(' + luaStr('NexaKS: ' + msg) + ')'; }
+
+// ---- Verify status codes (machine-readable, logged internally) ----
+const VC = {
+    PROJECT_NOT_FOUND: 'Invalid project key',
+    PROJECT_DISABLED: 'Project is disabled',
+    SCRIPT_NOT_FOUND: 'Script not found',
+    SCRIPT_DISABLED: 'This script is currently disabled',
+    KEY_REQUIRED: 'License key required',
+    KEY_INCORRECT: 'Invalid license key',
+    KEY_UNASSIGNED: 'License not activated',
+    KEY_HWID_LOCKED: 'Hardware ID mismatch. Reset your HWID to use this device.',
+    KEY_EXPIRED: 'License expired',
+    KEY_REVOKED: 'License revoked',
+    KEY_BANNED: 'Access denied',
+    EXECUTION_LIMIT_REACHED: 'Execution limit reached',
+    INVALID_REQUEST: 'Invalid request',
+    RATE_LIMITED: 'Too many requests — slow down',
+    INTERNAL_ERROR: 'Server error — try again later'
+};
+
 // ========== HTML Routes ==========
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
@@ -680,11 +725,194 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
 app.get('/api/verify', async (req, res) => {
     const { license, hwid, project } = req.query;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const scriptId = (req.query.script || '').trim();
 
-    if (!license || !hwid) {
-        return res.status(400).type('text/plain').send(
-            'error("NexaKS: Missing license or hwid parameter")'
-        );
+    // ---- helper: uniform failure response + logging ----
+    const fail = async (code, projectId, keyId) => {
+        if (projectId) await writeProjectLog(projectId, keyId || null,
+            'verify_fail', 'warning', code, clientIp, (hwid || '').toString().slice(0, 128));
+        return res.status(200).type('text/plain').send(luaError(VC[code] || 'Access denied'));
+    };
+
+    if (!sb) return res.status(200).type('text/plain').send(luaError(VC.INTERNAL_ERROR));
+
+    // ---- 5. validate request inputs ----
+    if (typeof hwid !== 'string' || !hwid.trim())
+        return res.status(200).type('text/plain').send(luaError(VC.INVALID_REQUEST));
+    const hwidClean = hwid.trim().substring(0, 128);
+    const licenseUpper = typeof license === 'string' ? license.trim().toUpperCase().substring(0, 64) : '';
+    // reject obviously malformed identifiers (defends the blacklist filter)
+    const safeId = (v) => /^[A-Za-z0-9._:\-]{1,128}$/.test(v);
+
+    // ---- 6. rate limit (per ip+license) ----
+    if (!rateLimit('v:' + clientIp + ':' + licenseUpper, 30, 60000))
+        return res.status(200).type('text/plain').send(luaError(VC.RATE_LIMITED));
+
+    try {
+        // ---- 1. resolve project (by api_key, or later from the key) ----
+        let projectRow = null;
+        if (project) {
+            if (!safeId(project)) return fail('PROJECT_NOT_FOUND');
+            const { data } = await sb.from('projects').select('*').eq('api_key', project).maybeSingle();
+            if (!data) return fail('PROJECT_NOT_FOUND');
+            // ---- 3. project status / archive ----
+            if (data.status !== 'active' || data.archived) return fail('PROJECT_DISABLED', data.id);
+            projectRow = data;
+        }
+
+        // ---- 8. determine access mode (ffa vs key_required) ----
+        const settings = (projectRow && projectRow.settings) || {};
+        const ffa = settings?.access?.mode === 'ffa' || settings?.ffa === true;
+
+        // ---- 2 + 4. resolve script early when project is known ----
+        let scriptRow = null;
+        if (projectRow) {
+            if (scriptId) {
+                if (!safeId(scriptId)) return fail('SCRIPT_NOT_FOUND', projectRow.id);
+                const { data } = await sb.from('project_scripts').select('*')
+                    .eq('id', scriptId).eq('project_id', projectRow.id).maybeSingle();
+                if (!data) return fail('SCRIPT_NOT_FOUND', projectRow.id);
+                if (!data.enabled || data.status === 'disabled') return fail('SCRIPT_DISABLED', projectRow.id);
+                scriptRow = data;
+            } else {
+                const { data } = await sb.from('project_scripts').select('*')
+                    .eq('project_id', projectRow.id).eq('enabled', true).neq('status', 'disabled')
+                    .order('created_at', { ascending: true }).limit(1).maybeSingle();
+                scriptRow = data;
+            }
+        }
+
+        // ---- FFA short-circuit: no key needed, still respect blacklist by hwid/ip ----
+        if (ffa && projectRow) {
+            const now = new Date().toISOString();
+            const { data: bl } = await sb.from('project_blacklist')
+                .select('type, identifier, reason, ban_expire')
+                .eq('project_id', projectRow.id).eq('type', 'hwid').eq('identifier', hwidClean).limit(1);
+            if ((bl || []).some(b => !b.ban_expire || b.ban_expire > now)) return fail('KEY_BANNED', projectRow.id);
+            const payload = buildPayload(projectRow, scriptRow, null);
+            await writeProjectLog(projectRow.id, scriptRow?.id || null, 'verify_success', 'success', 'FFA execution', clientIp, hwidClean);
+            return res.status(200).type('text/plain').send(payload);
+        }
+
+        // ---- key required from here ----
+        if (!licenseUpper) return fail('KEY_REQUIRED', projectRow?.id);
+
+        // ---- 9. find key inside this project only (or global for legacy) ----
+        let keyQuery = sb.from('keys')
+            .select('*, users!keys_user_id_fkey(username, is_banned)')
+            .eq('key', licenseUpper);
+        if (projectRow) keyQuery = keyQuery.eq('project_id', projectRow.id);
+        const { data: key } = await keyQuery.maybeSingle();
+        if (!key) return fail('KEY_INCORRECT', projectRow?.id);
+
+        // auto-load project from key (legacy path)
+        if (!projectRow && key.project_id) {
+            const { data } = await sb.from('projects').select('*').eq('id', key.project_id).maybeSingle();
+            if (data) {
+                if (data.status !== 'active' || data.archived) return fail('PROJECT_DISABLED', data.id, key.id);
+                projectRow = data;
+            }
+        }
+
+        // ---- 7. blacklist (key / hwid / ip) — parameterized, no interpolation ----
+        if (projectRow) {
+            const now = new Date().toISOString();
+            const wanted = [['key', licenseUpper], ['hwid', hwidClean], ['ip', clientIp]];
+            const { data: bl } = await sb.from('project_blacklist')
+                .select('type, identifier, reason, ban_expire')
+                .eq('project_id', projectRow.id).limit(500);
+            const hit = (bl || []).find(b =>
+                wanted.some(([t, v]) => b.type === t && b.identifier === v) &&
+                (!b.ban_expire || b.ban_expire > now));
+            if (hit) return fail('KEY_BANNED', projectRow.id, key.id);
+        }
+
+        // ---- banned user ----
+        if (key.users?.is_banned) return fail('KEY_BANNED', projectRow?.id, key.id);
+
+        // ---- 10. key state ----
+        if (key.status === 'revoked') return fail('KEY_REVOKED', projectRow?.id, key.id);
+        if (key.status === 'banned') return fail('KEY_BANNED', projectRow?.id, key.id);
+        if (key.status === 'unclaimed' || key.status === 'unassigned') return fail('KEY_UNASSIGNED', projectRow?.id, key.id);
+
+        // ---- 11. expiration ----
+        if (key.expires_at && new Date(key.expires_at) < new Date()) {
+            await sb.from('keys').update({ status: 'expired' }).eq('key', licenseUpper);
+            return fail('KEY_EXPIRED', projectRow?.id, key.id);
+        }
+        if (key.status === 'expired') return fail('KEY_EXPIRED', projectRow?.id, key.id);
+
+        // ---- 12. execution cap ----
+        const maxExec = settings?.access?.max_executions ?? settings?.max_executions ?? 0;
+        if (maxExec > 0 && (key.execution_count || 0) >= maxExec)
+            return fail('EXECUTION_LIMIT_REACHED', projectRow?.id, key.id);
+
+        // ---- strict whitelist enforcement ----
+        const strict = settings?.access?.mode === 'strict' || settings?.whitelist_mode === 'strict';
+        if (strict && projectRow) {
+            const wl = [['key', licenseUpper], ['hwid', hwidClean],
+                        key.user_id ? ['user_id', key.user_id] : null].filter(Boolean);
+            const { data: wlRows } = await sb.from('project_whitelist')
+                .select('type, identifier').eq('project_id', projectRow.id).limit(500);
+            const allowed = (wlRows || []).some(r => wl.some(([t, v]) => r.type === t && r.identifier === v));
+            if (!allowed) return fail('KEY_BANNED', projectRow.id, key.id);
+        }
+
+        // ---- 13. HWID bind or compare ----
+        if (!key.hwid) {
+            await sb.from('keys').update({
+                hwid: hwidClean, execution_count: (key.execution_count || 0) + 1, last_used: new Date().toISOString()
+            }).eq('key', licenseUpper);
+            if (projectRow) await writeProjectLog(projectRow.id, key.id, 'hwid_bind', 'success', 'HWID bound', clientIp, hwidClean);
+        } else if (key.hwid !== hwidClean) {
+            return fail('KEY_HWID_LOCKED', projectRow?.id, key.id);
+        } else {
+            await sb.from('keys').update({
+                execution_count: (key.execution_count || 0) + 1, last_used: new Date().toISOString()
+            }).eq('key', licenseUpper);
+        }
+
+        // ---- 14. record execution ----
+        await logAttempt(key.user_id, licenseUpper, 'verify_success', 'success', 'Script executed', clientIp);
+        if (projectRow) await writeProjectLog(projectRow.id, scriptRow?.id || null, 'verify_success', 'success', 'Script executed', clientIp, hwidClean);
+
+        // ---- 15. return published payload ----
+        if (scriptRow) {
+            sb.from('project_scripts').update({ execution_count: (scriptRow.execution_count || 0) + 1 })
+                .eq('id', scriptRow.id).then(() => {}, () => {});
+            sb.from('keys').update({ last_script_id: scriptRow.id }).eq('key', licenseUpper).then(() => {}, () => {});
+        }
+        return res.status(200).type('text/plain').send(buildPayload(projectRow, scriptRow, key));
+
+    } catch (err) {
+        console.error('Verify error:', err);
+        await logAttempt(null, licenseUpper, 'verify_error', 'failed', 'Server error', clientIp);
+        return res.status(200).type('text/plain').send(luaError(VC.INTERNAL_ERROR));
+    }
+});
+
+// Build the Lua payload for a resolved script (project script > legacy > plan > fallback)
+function buildPayload(projectRow, scriptRow, key) {
+    if (scriptRow && scriptRow.script_content) return scriptRow.script_content;
+    if (projectRow && projectRow.script_content) return projectRow.script_content;
+    if (key) { /* legacy plan-based handled by caller via fetchScriptForKey */ }
+    return fallbackPayload(key || { key: '', plan: 'free' });
+}
+
+// ---- Helpers (existing) ----
+async function fetchScriptForKey(key) {
+    try {
+        const { data, error } = await sb.rpc('get_script_for_plan',
+            { user_plan: key.plan });
+        if (error || !data || data.length === 0) return null;
+        const script = data[0];
+        sb.from('scripts').update({
+            execution_count: (script.execution_count || 0) + 1
+        }).eq('id', script.id).then(() => {}, () => {});
+        return script.script_content;
+    } catch (err) {
+        console.error('fetchScriptForKey:', err);
+        return null;
     }
     if (!sb) {
         return res.status(500).type('text/plain').send(
