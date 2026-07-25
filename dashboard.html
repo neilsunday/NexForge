@@ -1,19 +1,277 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard - NexaKS</title><link rel="stylesheet" href="css/style.css"></head>
-<body>
-<div class="bg-gradient"></div><div class="bg-grid"></div>
-<div id="authLoader" style="position:fixed;inset:0;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;z-index:9999"><div class="spinner"></div></div>
-<div class="dashboard-layout" style="display:none" id="dashboardMain">
-<aside class="sidebar" id="sidebar"><div class="sidebar-header"><a href="index.html" class="logo"><span class="logo-text">NexaKS</span></a></div><nav class="sidebar-nav"><div class="sidebar-section-title">Main</div><a href="dashboard.html" class="active">Dashboard</a><a href="projects.html">Projects</a><a href="#" onclick="showSection('key');return false">License Key</a><a href="#" onclick="showSection('loader');return false">Loader Script</a><a href="#" onclick="showSection('activity');return false">Activity</a><div class="sidebar-section-title">Support</div><a href="#" id="adminLink" style="display:none">Admin Panel</a><div class="sidebar-section-title">Account</div><a href="#" onclick="handleLogout();return false">Sign Out</a></nav></aside>
-<main class="main-content"><div class="page-header"><div><button class="sidebar-toggle" onclick="toggleSidebar()">Menu</button><h1 class="page-title">Welcome back, <span class="gradient-text" id="userName">...</span></h1><p class="page-subtitle">Manage your license, hardware binding, and script access</p></div><div class="user-menu"><img id="userAvatarImg" style="display:none;width:32px;height:32px;border-radius:50%" alt=""><div class="user-avatar" id="userAvatar">?</div><div class="user-info"><div class="user-name" id="userNameSmall">Loading...</div><div class="user-role" id="userRole">Free Plan</div></div></div></div>
-<div class="card" id="noKeyState" style="display:none;text-align:center;padding:60px 24px"><h2>No active license</h2><p style="color:var(--text-secondary);margin:12px auto 24px;max-width:400px">Redeem a license key to unlock access.</p><button class="btn btn-primary" onclick="openRedeemModal()">Redeem Key</button></div>
-<div id="activeKeyState" style="display:none"><div class="stats-grid"><div class="stat-card"><div class="stat-card-label">License Status</div><div class="stat-card-value"><span class="badge badge-success" id="statusBadge">Active</span></div><div class="stat-card-change" id="statusSub">Waiting</div></div><div class="stat-card"><div class="stat-card-label">Expires In</div><div class="stat-card-value" id="expiresIn">-</div><div class="stat-card-change" id="expiresDate">-</div></div><div class="stat-card"><div class="stat-card-label">HWID Resets</div><div class="stat-card-value" id="hwidResets">0/5</div><div class="stat-card-change" id="hwidResetsSub">Available</div></div><div class="stat-card"><div class="stat-card-label">Executions</div><div class="stat-card-value" id="execCount">0</div><div class="stat-card-change">Total</div></div></div>
-<div class="card" id="section-key"><div class="card-header"><div><div class="card-title">License Key</div><div class="card-desc">Unique to your account and locked to your device</div></div></div><div class="key-display"><span class="key-value" id="keyValue">-</span><button class="copy-btn" onclick="copyKey()">Copy</button></div><div class="info-grid"><div class="info-item"><div class="info-label">Hardware ID</div><div class="info-value" id="hwidValue">Not bound</div></div><div class="info-item"><div class="info-label">Activated</div><div class="info-value" id="activatedDate">-</div></div><div class="info-item"><div class="info-label">Expires</div><div class="info-value" id="expiresValue">-</div></div><div class="info-item"><div class="info-label">Plan</div><div class="info-value"><span class="badge badge-info" id="planBadge">Free</span></div></div></div><div style="display:flex;gap:10px;margin-top:20px"><button class="btn btn-primary" onclick="openResetModal()">Reset HWID</button><button class="btn btn-ghost" onclick="openRedeemModal()">Add Another Key</button></div></div>
-<div class="card" id="section-loader"><div class="card-header"><div><div class="card-title">Authentication Loader</div><div class="card-desc">Use the project loader for deterministic routing</div></div></div><textarea class="form-textarea" id="loaderScript" readonly style="min-height:160px;font-size:12px"></textarea><button class="btn btn-primary" onclick="copyLoader()">Copy Loader</button></div>
-<div class="card" id="section-activity"><div class="card-header"><div><div class="card-title">Recent Activity</div></div></div><div class="table-wrapper"><table class="table"><thead><tr><th>Event</th><th>Details</th><th>Time</th></tr></thead><tbody id="activityTableBody"><tr><td colspan="3">No activity yet</td></tr></tbody></table></div></div></div>
-</main></div>
-<div class="modal-overlay" id="resetModal" aria-hidden="true"><div class="modal"><div class="modal-title">Reset Hardware ID</div><div class="modal-desc">The next successful execution will bind this license to the new device.</div><div class="modal-actions"><button class="btn btn-ghost" onclick="closeResetModal()">Cancel</button><button class="btn btn-primary" onclick="confirmReset()">Confirm Reset</button></div></div></div>
-<div class="modal-overlay" id="redeemModal" aria-hidden="true"><div class="modal"><div class="modal-title">Redeem License Key</div><div class="modal-desc">Enter the license key you received.</div><div class="form-group"><input type="text" class="form-input" id="redeemInput" placeholder="NXKS-XXXX-XXXX-XXXX-XXXX"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="closeRedeemModal()">Cancel</button><button class="btn btn-primary" id="redeemConfirmBtn" onclick="confirmRedeem()">Redeem</button></div></div></div>
-<div class="toast-container" id="toastContainer"></div><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="js/supabase.js"></script><script src="js/dashboard.js"></script>
-</body></html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Dashboard - NexaKS</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+    <div
+      id="authLoader"
+      style="
+        position: fixed;
+        inset: 0;
+        background: var(--bg-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      "
+    >
+      <div class="spinner"></div>
+    </div>
+    <div class="dashboard-layout" style="display: none" id="dashboardMain">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <a href="index.html" class="logo"
+            ><span class="logo-text">NexaKS</span></a
+          >
+        </div>
+        <nav class="sidebar-nav">
+          <div class="sidebar-section-title">Main</div>
+          <a href="dashboard.html" class="active">Dashboard</a
+          ><a href="projects.html">Projects</a
+          ><a
+            href="#"
+            onclick="
+              showSection('key');
+              return false;
+            "
+            >License Key</a
+          ><a
+            href="#"
+            onclick="
+              showSection('loader');
+              return false;
+            "
+            >Loader Script</a
+          ><a
+            href="#"
+            onclick="
+              showSection('activity');
+              return false;
+            "
+            >Activity</a
+          >
+          <div class="sidebar-section-title">Support</div>
+          <a href="#" id="adminLink" style="display: none">Admin Panel</a>
+          <div class="sidebar-section-title">Account</div>
+          <a
+            href="#"
+            onclick="
+              handleLogout();
+              return false;
+            "
+            >Sign Out</a
+          >
+        </nav>
+      </aside>
+      <main class="main-content">
+        <div class="page-header">
+          <div>
+            <button class="sidebar-toggle" onclick="toggleSidebar()">
+              Menu
+            </button>
+            <h1 class="page-title">
+              Welcome back, <span class="gradient-text" id="userName">...</span>
+            </h1>
+            <p class="page-subtitle">
+              Manage your license, hardware binding, and script access
+            </p>
+          </div>
+          <div class="user-menu">
+            <img
+              id="userAvatarImg"
+              style="
+                display: none;
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+              "
+              alt=""
+            />
+            <div class="user-avatar" id="userAvatar">?</div>
+            <div class="user-info">
+              <div class="user-name" id="userNameSmall">Loading...</div>
+              <div class="user-role" id="userRole">Free Plan</div>
+            </div>
+          </div>
+        </div>
+        <div
+          class="card"
+          id="noKeyState"
+          style="display: none; text-align: center; padding: 60px 24px"
+        >
+          <h2>No active license</h2>
+          <p
+            style="
+              color: var(--text-secondary);
+              margin: 12px auto 24px;
+              max-width: 400px;
+            "
+          >
+            Redeem a license key to unlock access.
+          </p>
+          <button class="btn btn-primary" onclick="openRedeemModal()">
+            Redeem Key
+          </button>
+        </div>
+        <div id="activeKeyState" style="display: none">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-card-label">License Status</div>
+              <div class="stat-card-value">
+                <span class="badge badge-success" id="statusBadge">Active</span>
+              </div>
+              <div class="stat-card-change" id="statusSub">Waiting</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Expires In</div>
+              <div class="stat-card-value" id="expiresIn">-</div>
+              <div class="stat-card-change" id="expiresDate">-</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">HWID Resets</div>
+              <div class="stat-card-value" id="hwidResets">0/5</div>
+              <div class="stat-card-change" id="hwidResetsSub">Available</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-card-label">Executions</div>
+              <div class="stat-card-value" id="execCount">0</div>
+              <div class="stat-card-change">Total</div>
+            </div>
+          </div>
+          <div class="card" id="section-key">
+            <div class="card-header">
+              <div>
+                <div class="card-title">License Key</div>
+                <div class="card-desc">
+                  Unique to your account and locked to your device
+                </div>
+              </div>
+            </div>
+            <div class="key-display">
+              <span class="key-value" id="keyValue">-</span
+              ><button class="copy-btn" onclick="copyKey()">Copy</button>
+            </div>
+            <div class="info-grid">
+              <div class="info-item">
+                <div class="info-label">Hardware ID</div>
+                <div class="info-value" id="hwidValue">Not bound</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Activated</div>
+                <div class="info-value" id="activatedDate">-</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Expires</div>
+                <div class="info-value" id="expiresValue">-</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Plan</div>
+                <div class="info-value">
+                  <span class="badge badge-info" id="planBadge">Free</span>
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px">
+              <button class="btn btn-primary" onclick="openResetModal()">
+                Reset HWID</button
+              ><button class="btn btn-ghost" onclick="openRedeemModal()">
+                Add Another Key
+              </button>
+            </div>
+          </div>
+          <div class="card" id="section-loader">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Authentication Loader</div>
+                <div class="card-desc">
+                  Use the project loader for deterministic routing
+                </div>
+              </div>
+            </div>
+            <textarea
+              class="form-textarea"
+              id="loaderScript"
+              readonly
+              style="min-height: 160px; font-size: 12px"
+            ></textarea
+            ><button class="btn btn-primary" onclick="copyLoader()">
+              Copy Loader
+            </button>
+          </div>
+          <div class="card" id="section-activity">
+            <div class="card-header">
+              <div><div class="card-title">Recent Activity</div></div>
+            </div>
+            <div class="table-wrapper">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th>Details</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody id="activityTableBody">
+                  <tr>
+                    <td colspan="3">No activity yet</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="modal-overlay" id="resetModal" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-title">Reset Hardware ID</div>
+        <div class="modal-desc">
+          The next successful execution will bind this license to the new
+          device.
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" onclick="closeResetModal()">
+            Cancel</button
+          ><button class="btn btn-primary" onclick="confirmReset()">
+            Confirm Reset
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-overlay" id="redeemModal" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-title">Redeem License Key</div>
+        <div class="modal-desc">Enter the license key you received.</div>
+        <div class="form-group">
+          <input
+            type="text"
+            class="form-input"
+            id="redeemInput"
+            placeholder="NXKS-XXXX-XXXX-XXXX-XXXX"
+          />
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" onclick="closeRedeemModal()">
+            Cancel</button
+          ><button
+            class="btn btn-primary"
+            id="redeemConfirmBtn"
+            onclick="confirmRedeem()"
+          >
+            Redeem
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+    <script src="js/dashboard.js"></script>
+  </body>
+</html>
