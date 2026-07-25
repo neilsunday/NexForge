@@ -1,8 +1,10 @@
-/* NexaKS - Dashboard JS (with fixed Lua loader) */
+/* NexaKS - Dashboard JS (short project-aware loader) */
 
 let currentUser = null;
 let currentProfile = null;
 let currentKey = null;
+let currentProject = null;
+let currentScript = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     const loader = document.getElementById('authLoader');
@@ -124,6 +126,26 @@ async function loadUserKey() {
     currentKey = data;
     if (noKey) noKey.style.display = 'none';
     if (active) active.style.display = 'block';
+
+    // Fetch the linked project + its published script (for the short loader)
+    currentProject = null;
+    currentScript = null;
+    if (currentKey.project_id) {
+        const { data: proj } = await NexaKS.supabase.from('projects')
+            .select('*').eq('id', currentKey.project_id).maybeSingle();
+        currentProject = proj;
+        if (proj) {
+            const { data: scripts } = await NexaKS.supabase.from('project_scripts')
+                .select('*').eq('project_id', proj.id).eq('status', 'published')
+                .order('updated_at', { ascending: false });
+            if (scripts && scripts.length > 0) {
+                currentScript = scripts.find(s => s.plan === currentKey.plan)
+                    || scripts.find(s => s.plan === 'free')
+                    || scripts[0];
+            }
+        }
+    }
+
     renderKey();
 }
 
@@ -171,21 +193,27 @@ function renderKey() {
         badge.className = 'badge ' + (plan === 'enterprise' ? 'badge-warning' : plan === 'pro' ? 'badge-info' : 'badge');
     }
 
-    // FIXED LOADER - with proper pcall error handling for Roblox
-    const loaderLines = [
-        '-- NexaKS Authentication Loader',
-        'local license = "' + currentKey.key + '"',
-        'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()',
-        'local url = "' + window.location.origin + '/api/verify?license=" .. license .. "&hwid=" .. hwid',
-        '',
-        'local ok, response = pcall(function() return game:HttpGet(url, true) end)',
-        'if not ok then warn("[NexaKS] Network error: " .. tostring(response)) return end',
-        'if not response or response == "" then warn("[NexaKS] Empty response from server") return end',
-        '',
-        'local success, err = pcall(function() loadstring(response)() end)',
-        'if not success then warn("[NexaKS] " .. tostring(err)) end'
-    ];
-    if ($('loaderScript')) $('loaderScript').value = loaderLines.join('\n');
+    // ---- SHORT LOADER ----
+    // If the key is attached to a project with a published script, serve
+    // the project loader (keyless = 1 line, key-based = 2 lines).
+    // Otherwise, fall back to the short /api/verify loader.
+    const origin = window.location.origin;
+    let loader;
+    if (currentProject && currentScript) {
+        const base = origin + '/api/load/' + currentProject.slug +
+            (currentScript.load_id ? '?script=' + currentScript.load_id : '');
+        if (currentScript.keyless) {
+            loader = 'loadstring(game:HttpGet("' + base + '"))()';
+        } else {
+            const sep = base.includes('?') ? '&' : '?';
+            loader = '_G.script_key = "' + currentKey.key + '"\n' +
+                'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key))()';
+        }
+    } else {
+        loader = '_G.script_key = "' + currentKey.key + '"\n' +
+            'loadstring(game:HttpGet("' + origin + '/api/verify?license=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
+    }
+    if ($('loaderScript')) $('loaderScript').value = loader;
 }
 
 async function loadActivity() {
