@@ -68,7 +68,8 @@ const commands = [
         .addStringOption(opt => opt.setName('duration').setDescription('Duration').setRequired(true)
             .addChoices({name:'1 day',value:'1'},{name:'7 days',value:'7'},{name:'30 days',value:'30'},
                 {name:'90 days',value:'90'},{name:'1 year',value:'365'},{name:'Lifetime',value:'lifetime'}))
-        .addIntegerOption(opt => opt.setName('quantity').setDescription('Quantity').setMinValue(1).setMaxValue(50)),
+        .addIntegerOption(opt => opt.setName('quantity').setDescription('Quantity').setMinValue(1).setMaxValue(50))
+        .addStringOption(opt => opt.setName('project').setDescription('Project slug (ties keys to a specific project)').setRequired(false)),
 
     new SlashCommandBuilder()
         .setName('revoke')
@@ -237,7 +238,8 @@ client.on('interactionCreate', async (interaction) => {
                 const plan = interaction.options.getString('plan');
                 const duration = interaction.options.getString('duration');
                 const qty = interaction.options.getInteger('quantity') || 1;
-                return handleGenerate(interaction, plan, duration, qty);
+                const projSlug = interaction.options.getString('project');
+                return handleGenerate(interaction, plan, duration, qty, projSlug);
             }
 
             // /revoke (admin)
@@ -415,35 +417,62 @@ async function handleGetScript(interaction, projectSlug) {
         return interaction.editReply({ embeds: [embed('No Active License', 'You have no active license. Redeem one first.', 0xef4444)] });
     }
 
-    let key = null, project = null;
+    // ---- PANEL IS TIED TO A PROJECT ----
     if (projectSlug) {
         const { data: proj } = await sb.from('projects').select('*').eq('slug', projectSlug).maybeSingle();
         if (!proj) return interaction.editReply({ embeds: [embed('Not Found', 'Project no longer exists.', 0xef4444)] });
-        project = proj;
-        key = keys.find(k => k.project_id === proj.id) || keys[0];
-    } else {
-        key = keys[0];
-        if (key.project_id) {
-            const { data: proj } = await sb.from('projects').select('*').eq('id', key.project_id).maybeSingle();
-            project = proj;
+
+        // Require a key that belongs to THIS project
+        const key = keys.find(k => k.project_id === proj.id);
+        if (!key) {
+            return interaction.editReply({ embeds: [embed('No ' + proj.name + ' License',
+                'You do not have an active license for **' + proj.name + '**.\n\n' +
+                'Your current key(s) belong to other projects. Purchase or redeem a **' + proj.name + '** key first.',
+                0xef4444)] });
         }
+
+        // Fetch published script for this project + plan
+        const { data: scripts } = await sb.from('project_scripts')
+            .select('*').eq('project_id', proj.id).eq('status', 'published')
+            .order('updated_at', { ascending: false });
+        if (!scripts || scripts.length === 0) {
+            return interaction.editReply({ embeds: [embed('No Script Yet',
+                'Project **' + proj.name + '** has no published script.', 0xf59e0b)] });
+        }
+        const script = scripts.find(s => s.plan === key.plan) || scripts.find(s => s.plan === 'free') || scripts[0];
+
+        const base = SITE_URL + '/api/load/' + proj.slug + (script.load_id ? '?script=' + script.load_id : '');
+        let loader;
+        if (script.keyless) {
+            loader = 'loadstring(game:HttpGet("' + base + '"))()';
+        } else {
+            const sep = base.includes('?') ? '&' : '?';
+            loader = '_G.script_key = "' + key.key + '"\n' +
+                'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key))()';
+        }
+        return sendLoader(interaction, loader, !script.keyless);
     }
 
-    // No project attached anywhere -> short legacy verify loader
+    // ---- GENERIC PANEL (no project) - use user's most recent key + its project ----
+    const key = keys[0];
+    let project = null;
+    if (key.project_id) {
+        const { data: proj } = await sb.from('projects').select('*').eq('id', key.project_id).maybeSingle();
+        project = proj;
+    }
+
     if (!project) {
         const loader = '_G.script_key = "' + key.key + '"\n' +
             'loadstring(game:HttpGet("' + SITE_URL + '/api/verify?license=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
         return sendLoader(interaction, loader, true);
     }
 
-    // Fetch published script for this project
     const { data: scripts } = await sb.from('project_scripts')
         .select('*').eq('project_id', project.id).eq('status', 'published')
         .order('updated_at', { ascending: false });
     if (!scripts || scripts.length === 0) {
         return interaction.editReply({ embeds: [embed('No Script Yet', 'Project **' + project.name + '** has no published script.', 0xf59e0b)] });
     }
-    // Prefer exact plan, else free, else first
     const script = scripts.find(s => s.plan === key.plan) || scripts.find(s => s.plan === 'free') || scripts[0];
 
     const base = SITE_URL + '/api/load/' + project.slug + (script.load_id ? '?script=' + script.load_id : '');
@@ -578,8 +607,19 @@ async function handleKeyInfo(interaction) {
         '**Executions:** ' + (key.execution_count || 0), 0x7c3aed)] });
 }
 
-async function handleGenerate(interaction, plan, duration, qty) {
+async function handleGenerate(interaction, plan, duration, qty, projSlug) {
     const user = await ensureUserRow(interaction.user);
+
+    // Resolve project if slug provided
+    let project = null;
+    if (projSlug) {
+        const { data: proj } = await sb.from('projects').select('id,name,slug')
+            .eq('slug', projSlug.trim().toLowerCase()).maybeSingle();
+        if (!proj) return interaction.editReply({ embeds: [embed('Project Not Found',
+            'No project with slug \`' + projSlug + '\`. Create it on the website first.', 0xef4444)] });
+        project = proj;
+    }
+
     const keys = [];
     const rows = [];
     for (let i = 0; i < qty; i++) {
@@ -589,7 +629,8 @@ async function handleGenerate(interaction, plan, duration, qty) {
             key: k, plan: plan,
             duration_days: duration === 'lifetime' ? null : parseInt(duration),
             hwid_reset_limit: 5, status: 'unclaimed',
-            created_by: user?.id
+            created_by: user?.id,
+            project_id: project ? project.id : null
         });
     }
 
@@ -598,12 +639,13 @@ async function handleGenerate(interaction, plan, duration, qty) {
 
     await sb.from('logs').insert({
         user_id: user?.id, action: 'admin_generate', status: 'success',
-        metadata: { message: 'Generated ' + qty + ' ' + plan + ' keys via bot (' + duration + ')' }
+        metadata: { message: 'Generated ' + qty + ' ' + plan + ' keys' + (project ? ' for ' + project.slug : '') + ' via bot (' + duration + ')' }
     });
 
+    const projLine = project ? '\n**Project:** ' + project.name + ' (\`' + project.slug + '\`)' : '\n**Project:** none (unattached)';
     return interaction.editReply({ embeds: [embed('Keys Generated',
-        'Generated **' + qty + '** ' + plan.toUpperCase() + ' keys (' + duration + ')\n\n' +
-        keys.map(k => '`' + k + '`').join('\n') + '\n\n*Save these Ã¢â‚¬â€ hindi na uulit yung display.*', 0x10b981)] });
+        'Generated **' + qty + '** ' + plan.toUpperCase() + ' keys (' + duration + ')' + projLine + '\n\n' +
+        keys.map(k => '\`' + k + '\`').join('\n') + '\n\n*Save these - hindi na uulit yung display.*', 0x10b981)] });
 }
 
 async function handleRevoke(interaction, key) {
