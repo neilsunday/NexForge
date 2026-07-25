@@ -1,0 +1,267 @@
+/* NexaKS - Access Gate
+ *
+ * Drop this into every protected page BEFORE any other JS.
+ * It enforces:
+ *   - No session at all           -> redirect to /login.html
+ *   - Discord OAuth session only  -> allow dashboard only, hide/block admin nav
+ *   - Admin key session           -> full access
+ *
+ * Set window.NEXAKS_PAGE = "dashboard" | "admin" | "projects" | "analytics"
+ * BEFORE loading this script (or add data-page="..." to <body>).
+ */
+
+(function () {
+  "use strict";
+
+  const SESSION_KEY = "nexaks_session";
+  const PAGE = (window.NEXAKS_PAGE || document.body?.dataset?.page || guessPage()).toLowerCase();
+
+  // Pages that require admin key. Dashboard is user-level and needs any valid login.
+  const ADMIN_PAGES = ["admin", "projects", "analytics"];
+  const USER_PAGES  = ["dashboard"];
+
+  function guessPage() {
+    const path = window.location.pathname.toLowerCase();
+    if (path.includes("admin"))     return "admin";
+    if (path.includes("projects"))  return "projects";
+    if (path.includes("analytics")) return "analytics";
+    if (path.includes("dashboard")) return "dashboard";
+    return "dashboard";
+  }
+
+  function readSession() {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (!s || typeof s !== "object") return null;
+      if (s.expires_at && Date.now() > s.expires_at) {
+        localStorage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return s;
+    } catch (_) { return null; }
+  }
+
+  function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem("nexaks_pending_discord");
+  }
+
+  function redirect(url) {
+    window.location.replace(url);
+  }
+
+  function showKeyPrompt(reason) {
+    // Full-screen modal asking for admin key (used when a non-admin tries admin nav)
+    const existing = document.getElementById("nexaks-key-prompt");
+    if (existing) { existing.style.display = "flex"; return; }
+
+    const overlay = document.createElement("div");
+    overlay.id = "nexaks-key-prompt";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;font-family:'Inter',sans-serif;";
+    overlay.innerHTML =
+      '<div style="max-width:420px;width:100%;background:#1a1a1e;border:1px solid #2a2a2f;border-radius:16px;padding:32px 28px;">' +
+        '<h2 style="font-size:22px;font-weight:700;margin:0 0 8px;color:#e5e7eb;letter-spacing:-0.02em;">Admin Key Required</h2>' +
+        '<p style="color:#9ca3af;font-size:14px;margin:0 0 20px;">' + (reason || "This page requires an admin key to access.") + '</p>' +
+        '<div id="nexaks-prompt-err" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;"></div>' +
+        '<input id="nexaks-prompt-input" type="text" placeholder="NXKS-XXXX-XXXX-XXXX-XXXX" maxlength="24" ' +
+          'style="width:100%;box-sizing:border-box;padding:12px 14px;background:#0f0f11;border:1px solid #3a3a3f;border-radius:8px;color:#fff;font-family:\'JetBrains Mono\',monospace;font-size:14px;text-transform:uppercase;margin-bottom:14px;">' +
+        '<div style="display:flex;gap:10px;">' +
+          '<button id="nexaks-prompt-cancel" style="flex:1;padding:12px;background:transparent;border:1px solid #3a3a3f;border-radius:8px;color:#9ca3af;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>' +
+          '<button id="nexaks-prompt-submit" style="flex:2;padding:12px;background:linear-gradient(135deg,#7c3aed,#ec4899);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-family:inherit;">Verify</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    const input = document.getElementById("nexaks-prompt-input");
+    const err = document.getElementById("nexaks-prompt-err");
+    const submit = document.getElementById("nexaks-prompt-submit");
+    const cancel = document.getElementById("nexaks-prompt-cancel");
+
+    input.focus();
+    input.addEventListener("input", (e) => {
+      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit.click(); });
+
+    cancel.addEventListener("click", () => {
+      overlay.remove();
+      // Go back to dashboard if they cancel
+      if (PAGE !== "dashboard") window.location.href = "/dashboard.html";
+    });
+
+    submit.addEventListener("click", async () => {
+      err.style.display = "none";
+      const key = input.value.trim().toUpperCase();
+      if (!key.startsWith("NXKS-") || key.length !== 24) {
+        err.textContent = "Invalid key format.";
+        err.style.display = "block";
+        return;
+      }
+      submit.disabled = true;
+      submit.textContent = "Verifying...";
+
+      try {
+        if (!window.NexaKS?.supabase) {
+          throw new Error("Supabase client not loaded on this page.");
+        }
+        const { data: keyRow, error } = await NexaKS.supabase
+          .from("keys")
+          .select("key, plan, status, expires_at, user_id, users:user_id(id, username, is_banned)")
+          .eq("key", key).maybeSingle();
+
+        if (error) throw new Error(error.message);
+        if (!keyRow) throw new Error("Key not found.");
+        if (keyRow.plan !== "admin") throw new Error("This is not an admin key.");
+        if (keyRow.status === "revoked") throw new Error("This admin key has been revoked.");
+        if (keyRow.status === "expired") throw new Error("This admin key has expired.");
+        if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) throw new Error("This admin key expired.");
+        if (keyRow.users?.is_banned) throw new Error("The account tied to this key is banned.");
+
+        // Merge admin credentials into existing session (or create fresh)
+        const existing = readSession() || {};
+        const session = Object.assign({}, existing, {
+          key: keyRow.key,
+          plan: "admin",
+          user_id: keyRow.user_id || existing.user_id || null,
+          username: keyRow.users?.username || existing.username || "Admin",
+          is_admin: true,
+          login_method: existing.login_method === "discord" ? "discord+admin_key" : "admin_key",
+          expires_at: Date.now() + 7 * 24 * 3600 * 1000
+        });
+        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+
+        overlay.remove();
+        // Reload so the page picks up admin access
+        window.location.reload();
+      } catch (ex) {
+        err.textContent = ex.message || "Verification failed.";
+        err.style.display = "block";
+        submit.disabled = false;
+        submit.textContent = "Verify";
+      }
+    });
+  }
+
+  function hideAdminNavLinks() {
+    // Hide anything that links to admin.html / projects.html / analytics.html in the sidebar
+    const links = document.querySelectorAll('a[href*="admin.html"], a[href*="projects.html"], a[href*="analytics.html"]');
+    links.forEach(a => {
+      // Skip logo / non-nav anchors
+      if (a.classList.contains("logo")) return;
+      a.style.display = "none";
+    });
+  }
+
+  function interceptAdminNavClicks() {
+    // Intercept clicks on hidden or visible admin links so a Discord-only user is prompted
+    document.addEventListener("click", function (e) {
+      const link = e.target.closest("a");
+      if (!link) return;
+      const href = (link.getAttribute("href") || "").toLowerCase();
+      if (!href) return;
+      const targetsAdmin =
+        href.includes("admin.html") ||
+        href.includes("projects.html") ||
+        href.includes("analytics.html");
+      if (!targetsAdmin) return;
+      // Skip logo
+      if (link.classList.contains("logo")) return;
+
+      e.preventDefault();
+      showKeyPrompt("This page requires an admin key. Enter it below to unlock.");
+    }, true);
+  }
+
+  // ---------- MAIN GATE LOGIC ----------
+
+  // 1. Check for Supabase Discord session first (if the client is already loaded)
+  //    We need to wait a tick for supabase.js to init.
+  async function detectDiscordSession() {
+    if (!window.NexaKS?.getCurrentUser) return null;
+    try {
+      const user = await window.NexaKS.getCurrentUser();
+      return user || null;
+    } catch (_) { return null; }
+  }
+
+  async function boot() {
+    // Wait briefly for NexaKS supabase client to be ready
+    for (let i = 0; i < 20 && !window.NexaKS; i++) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    const localSession = readSession();
+    const discordUser = await detectDiscordSession();
+
+    // If we came back from Discord OAuth, mint a user-level session
+    if (discordUser && (!localSession || localSession.login_method === "admin_key" && !localSession.user_id)) {
+      // Fetch profile to see if is_admin flag is set (redeemed an admin key already)
+      let isAdmin = false;
+      let username = "User";
+      try {
+        const profile = await window.NexaKS.getUserProfile(discordUser.id);
+        isAdmin = !!profile?.is_admin;
+        username = profile?.username || discordUser.user_metadata?.full_name || "User";
+      } catch (_) {}
+
+      const merged = Object.assign({}, localSession || {}, {
+        user_id: discordUser.id,
+        username: username,
+        is_admin: localSession?.is_admin || isAdmin,
+        login_method: localSession?.login_method === "admin_key" ? "discord+admin_key" : "discord",
+        expires_at: Date.now() + 7 * 24 * 3600 * 1000
+      });
+      localStorage.setItem(SESSION_KEY, JSON.stringify(merged));
+      localStorage.removeItem("nexaks_pending_discord");
+      applyGate(merged);
+      return;
+    }
+
+    // No Discord session either
+    if (!localSession) {
+      redirect("/login.html");
+      return;
+    }
+
+    applyGate(localSession);
+  }
+
+  function applyGate(session) {
+    const wantsAdmin = ADMIN_PAGES.includes(PAGE);
+
+    if (wantsAdmin && !session.is_admin) {
+      // User is logged in via Discord only, trying to open an admin page
+      showKeyPrompt("This page requires an admin key. Enter it below to unlock.");
+      return;
+    }
+
+    // If they're on a user page but not admin, hide admin nav links
+    if (!session.is_admin) {
+      // Wait for DOM to be ready
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => {
+          hideAdminNavLinks();
+          interceptAdminNavClicks();
+        });
+      } else {
+        hideAdminNavLinks();
+        interceptAdminNavClicks();
+      }
+    }
+
+    // Expose session globally for pages that need it
+    window.NEXAKS_SESSION = session;
+  }
+
+  // Global logout helper
+  window.nexaksLogout = async function () {
+    if (!confirm("Sign out from NexaKS?")) return;
+    clearSession();
+    try { if (window.NexaKS?.signOut) await window.NexaKS.signOut(); } catch (_) {}
+    window.location.href = "/login.html";
+  };
+
+  boot();
+})();
