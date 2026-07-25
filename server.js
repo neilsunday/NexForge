@@ -58,6 +58,26 @@ async function requireAuth(req, res, next) {
     }
 }
 
+// Require the caller to be an admin (server-side, DB-backed check).
+// Never trust a client-supplied is_admin flag.
+async function requireAdmin(req, res, next) {
+    if (!sb) return res.status(500).json({ error: 'Server not configured' });
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token) return res.status(401).json({ error: 'Missing auth token' });
+    try {
+        const { data, error } = await sb.auth.getUser(token);
+        if (error || !data?.user) return res.status(401).json({ error: 'Invalid token' });
+        req.user = data.user;
+        const { data: prof } = await sb.from('users')
+            .select('is_admin').eq('id', data.user.id).maybeSingle();
+        if (!prof?.is_admin) return res.status(403).json({ error: 'Admin only' });
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Auth check failed' });
+    }
+}
+
 // Ensure the project belongs to req.user — reusable guard
 async function ownedProject(req, res) {
     const { id } = req.params;
@@ -487,6 +507,170 @@ app.get('/api/projects/:id/analytics', requireAuth, async (req, res) => {
         { p_project_id: project.id });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ analytics: data || {} });
+});
+
+// ================================================================
+// ============  LEGACY ENDPOINTS (Phase 1)  ======================
+// These replace direct anon-key writes previously done in
+// dashboard.js / admin.js. After the RLS lockdown, clients can no
+// longer write to keys/users/scripts/logs directly — they call here.
+// ================================================================
+
+/* ---------- ME: current user's profile (self) ---------- */
+app.get('/api/me', requireAuth, async (req, res) => {
+    const { data, error } = await sb.from('users')
+        .select('*').eq('id', req.user.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ profile: data });
+});
+
+/* ---------- MY KEY: current user's active key ---------- */
+app.get('/api/me/key', requireAuth, async (req, res) => {
+    const { data, error } = await sb.from('keys').select('*')
+        .eq('user_id', req.user.id).eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ key: data });
+});
+
+/* ---------- MY ACTIVITY: current user's logs ---------- */
+app.get('/api/me/activity', requireAuth, async (req, res) => {
+    const { data, error } = await sb.from('logs').select('*')
+        .eq('user_id', req.user.id)
+        .order('created_at', { ascending: false }).limit(20);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ logs: data || [] });
+});
+
+/* ---------- REDEEM a key (self-service) ---------- */
+app.post('/api/me/redeem', requireAuth, async (req, res) => {
+    const key = String(req.body?.key || '').trim().toUpperCase();
+    if (!key.startsWith('NXKS-')) return res.status(400).json({ error: 'Invalid key format' });
+
+    const { data: existing } = await sb.from('keys').select('*').eq('key', key).maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'Key not found' });
+    if (existing.status === 'revoked') return res.status(403).json({ error: 'Key revoked' });
+    if (existing.user_id && existing.user_id !== req.user.id)
+        return res.status(403).json({ error: 'Key already claimed' });
+
+    const updates = { user_id: req.user.id, status: 'active', redeemed_via: 'dashboard' };
+    if (existing.duration_days && !existing.expires_at) {
+        const exp = new Date(); exp.setDate(exp.getDate() + existing.duration_days);
+        updates.expires_at = exp.toISOString();
+    }
+    const { data, error } = await sb.from('keys').update(updates).eq('key', key).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    await logAttempt(req.user.id, key, 'redeem', 'success', 'Redeemed via dashboard', null);
+    res.json({ key: data });
+});
+
+/* ---------- RESET OWN HWID (self-service, cooldown enforced) ---------- */
+app.post('/api/me/reset-hwid', requireAuth, async (req, res) => {
+    const { data: k } = await sb.from('keys').select('*')
+        .eq('user_id', req.user.id).eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!k) return res.status(404).json({ error: 'No active key' });
+
+    const limit = k.hwid_reset_limit ?? 5;
+    if ((k.hwid_reset_count || 0) >= limit)
+        return res.status(429).json({ error: 'Reset limit reached' });
+
+    const { data, error } = await sb.from('keys').update({
+        hwid: null,
+        hwid_reset_count: (k.hwid_reset_count || 0) + 1,
+        last_hwid_reset: new Date().toISOString()
+    }).eq('key', k.key).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    await logAttempt(req.user.id, k.key, 'reset_hwid', 'success', 'HWID reset via dashboard', null);
+    res.json({ key: data });
+});
+
+// ============  ADMIN ENDPOINTS (Phase 1)  ==============
+
+/* ---------- ADMIN: stats ---------- */
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+    const [tk, ak, rk, tu] = await Promise.all([
+        sb.from('keys').select('*', { count: 'exact', head: true }),
+        sb.from('keys').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        sb.from('keys').select('*', { count: 'exact', head: true }).eq('status', 'revoked'),
+        sb.from('users').select('*', { count: 'exact', head: true })
+    ]);
+    res.json({ total_keys: tk.count||0, active_keys: ak.count||0,
+               revoked_keys: rk.count||0, total_users: tu.count||0 });
+});
+
+/* ---------- ADMIN: list keys ---------- */
+app.get('/api/admin/keys', requireAdmin, async (req, res) => {
+    const { data, error } = await sb.from('keys')
+        .select('*, users!keys_user_id_fkey(username, avatar_url)')
+        .order('created_at', { ascending: false }).limit(100);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ keys: data || [] });
+});
+
+/* ---------- ADMIN: generate keys ---------- */
+app.post('/api/admin/keys/generate', requireAdmin, async (req, res) => {
+    const { plan, duration, quantity } = req.body || {};
+    const qty = Math.min(50, Math.max(1, parseInt(quantity) || 1));
+    const rand = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let out = ''; const bytes = crypto.randomBytes(16);
+        for (let i = 0; i < 16; i++) out += chars[bytes[i] % chars.length];
+        return out.match(/.{1,4}/g).join('-');
+    };
+    const durationDays = duration === 'lifetime' ? null : (parseInt(duration) || null);
+    const rows = Array.from({ length: qty }, () => ({
+        key: 'NXKS-' + rand(),
+        plan: plan || 'free',
+        status: 'active',
+        duration_days: durationDays,
+        created_by: req.user.id
+    }));
+    const { data, error } = await sb.from('keys').insert(rows).select();
+    if (error) return res.status(500).json({ error: error.message });
+    await logAttempt(req.user.id, null, 'admin_generate', 'success',
+        `Generated ${qty} ${plan} keys`, null);
+    res.status(201).json({ keys: data });
+});
+
+/* ---------- ADMIN: revoke key ---------- */
+app.post('/api/admin/keys/revoke', requireAdmin, async (req, res) => {
+    const key = String(req.body?.key || '').trim();
+    if (!key) return res.status(400).json({ error: 'key required' });
+    const { error } = await sb.from('keys').update({ status: 'revoked' }).eq('key', key);
+    if (error) return res.status(500).json({ error: error.message });
+    await logAttempt(req.user.id, key, 'admin_revoke', 'success', 'Key revoked', null);
+    res.json({ ok: true });
+});
+
+/* ---------- ADMIN: list users ---------- */
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+    const { data, error } = await sb.from('users')
+        .select('*').order('created_at', { ascending: false }).limit(50);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ users: data || [] });
+});
+
+/* ---------- ADMIN: ban / unban user ---------- */
+app.post('/api/admin/users/ban', requireAdmin, async (req, res) => {
+    const { user_id, banned } = req.body || {};
+    if (!user_id) return res.status(400).json({ error: 'user_id required' });
+    const { error } = await sb.from('users').update({ is_banned: !!banned }).eq('id', user_id);
+    if (error) return res.status(500).json({ error: error.message });
+    await logAttempt(req.user.id, null, banned ? 'admin_ban' : 'admin_unban', 'success',
+        `${banned ? 'Banned' : 'Unbanned'} user ${user_id}`, null);
+    res.json({ ok: true });
+});
+
+/* ---------- ADMIN: recent logs ---------- */
+app.get('/api/admin/logs', requireAdmin, async (req, res) => {
+    const { data, error } = await sb.from('logs')
+        .select('*, users!logs_user_id_fkey(username)')
+        .order('created_at', { ascending: false }).limit(50);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ logs: data || [] });
 });
 
 // ================================================================
