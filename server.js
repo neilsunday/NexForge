@@ -30,6 +30,7 @@ app.use(express.static(__dirname));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
 app.get('/projects', (req, res) => res.sendFile(path.join(__dirname, 'projects.html')));
+app.get('/help', (req, res) => res.sendFile(path.join(__dirname, 'help.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 
 // ========== API Endpoints ==========
