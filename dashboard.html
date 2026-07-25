@@ -432,9 +432,9 @@
                 </div>
               </div>
               <div class="stat-card-value" id="expiresIn">
-                â€”<span style="font-size: 14px; color: var(--text-muted)"> days</span>
+                -<span style="font-size: 14px; color: var(--text-muted)"> days</span>
               </div>
-              <div class="stat-card-change" id="expiresDate">â€”</div>
+              <div class="stat-card-change" id="expiresDate">-</div>
             </div>
 
             <div class="stat-card">
@@ -477,7 +477,7 @@
             </div>
 
             <div class="key-display">
-              <span class="key-value" id="keyValue">â€”</span>
+              <span class="key-value" id="keyValue">-</span>
               <button class="copy-btn" onclick="copyKey()">
                 <span id="copyText">Copy</span>
               </button>
@@ -490,11 +490,11 @@
               </div>
               <div class="info-item">
                 <div class="info-label">Activated</div>
-                <div class="info-value" id="activatedDate">â€”</div>
+                <div class="info-value" id="activatedDate">-</div>
               </div>
               <div class="info-item">
                 <div class="info-label">Expires</div>
-                <div class="info-value" id="expiresValue">â€”</div>
+                <div class="info-value" id="expiresValue">-</div>
               </div>
               <div class="info-item">
                 <div class="info-label">Plan</div>
@@ -618,7 +618,7 @@
                   <div class="cmd-name"><code>/resethwid</code></div>
                   <div class="cmd-desc">
                     Reset your hardware ID so you can use the script on another device.
-                    <strong>24-hour cooldown</strong> between resets, <strong>5 max</strong> per key.
+                    <strong>15-hour cooldown</strong> between resets, <strong>5 max</strong> per key.
                   </div>
                 </div>
                 <span class="badge badge-success">User</span>
@@ -634,7 +634,7 @@
                 <div class="cmd-body">
                   <div class="cmd-name"><code>/keyinfo</code></div>
                   <div class="cmd-desc">
-                    View your active license details â€” plan, expiry, HWID binding status,
+                    View your active license details - plan, expiry, HWID binding status,
                     and remaining resets.
                   </div>
                 </div>
@@ -673,13 +673,13 @@
                 <div class="cmd-body">
                   <div class="cmd-name">
                     <code>/generate</code>
-                    <span class="cmd-arg">plan Â· duration Â· [quantity] Â· [project]</span>
+                    <span class="cmd-arg">plan - duration - [quantity] - [project]</span>
                   </div>
                   <div class="cmd-desc">
                     Generate new license keys.
-                    <strong>plan:</strong> free / pro / enterprise Â·
-                    <strong>duration:</strong> 1 / 7 / 30 / 90 / 365 / lifetime days Â·
-                    <strong>quantity:</strong> 1â€“50.
+                    <strong>plan:</strong> free / pro / enterprise -
+                    <strong>duration:</strong> 1 / 7 / 30 / 90 / 365 / lifetime days -
+                    <strong>quantity:</strong> 1-50.
                   </div>
                 </div>
                 <span class="badge badge-warning">Admin</span>
@@ -716,7 +716,7 @@
                     <span class="cmd-arg">user: @someone</span>
                   </div>
                   <div class="cmd-desc">
-                    Look up a user profile â€” total keys, active count, revoked count,
+                    Look up a user profile - total keys, active count, revoked count,
                     admin status, ban status.
                   </div>
                 </div>
@@ -733,7 +733,7 @@
                 <div class="cmd-body">
                   <div class="cmd-name">
                     <code>/setrole</code>
-                    <span class="cmd-arg">user: @someone Â· project: Macro | Private | Premium</span>
+                    <span class="cmd-arg">user: @someone - project: Macro | Private | Premium</span>
                   </div>
                   <div class="cmd-desc">
                     Manually assign a project role. Useful when the auto-assign on redeem
@@ -741,6 +741,25 @@
                   </div>
                 </div>
                 <span class="badge badge-warning">Admin</span>
+              </div>
+
+              <div class="cmd-item">
+                <div class="cmd-icon icon-pink">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <div class="cmd-body">
+                  <div class="cmd-name">
+                    <code>/forcereset</code>
+                    <span class="cmd-arg">user: @someone</span>
+                  </div>
+                  <div class="cmd-desc">
+                    <strong>Owner only.</strong> Force-reset a user's HWID.
+                    Bypasses the 15-hour cooldown AND restores the reset counter to 0/5.
+                  </div>
+                </div>
+                <span class="badge badge-danger">Owner</span>
               </div>
             </div>
 
@@ -793,8 +812,8 @@
                   </svg>
                 </div>
                 <div class="cmd-body">
-                  <div class="cmd-name"><code>Reset HWID (24h)</code></div>
-                  <div class="cmd-desc">Reset with confirmation dialog. 24h cooldown, 5 max per key.</div>
+                  <div class="cmd-name"><code>Reset HWID</code></div>
+                  <div class="cmd-desc">Reset with confirmation dialog. 15h cooldown, 5 max per key.</div>
                 </div>
                 <span class="badge badge-info">Button</span>
               </div>
@@ -869,7 +888,7 @@
         });
       }
 
-      // Fallback showSection helper â€” only assigned if your dashboard.js doesn't already define one
+      // Fallback showSection helper - only assigned if your dashboard.js doesn't already define one
       if (typeof window.showSection !== 'function') {
         window.showSection = function(id) {
           const el = document.getElementById('section-' + id);
