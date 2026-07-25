@@ -744,8 +744,9 @@ async function executeClearLogs() {
             query = query.lt('created_at', cutoff.toISOString());
         }
 
-        const { error, count } = await query.select('id', { count: 'exact', head: true });
+        const { data, error } = await query.select('id');
         if (error) throw error;
+        const count = data ? data.length : 0;
 
         // Log the cleanup action itself (irony intended)
         await NexaKS.supabase.from('logs').insert({
@@ -818,12 +819,13 @@ async function executeBulkDelete() {
         }
 
         // Safety: never delete active keys via bulk
-        const { data, error, count } = await NexaKS.supabase
+        const { data, error } = await NexaKS.supabase
             .from('keys').delete()
             .in('status', statusFilter)
-            .select('key', { count: 'exact' });
+            .select('key');
 
         if (error) throw error;
+        const count = data ? data.length : 0;
 
         await NexaKS.supabase.from('logs').insert({
             user_id: currentUser.id,
