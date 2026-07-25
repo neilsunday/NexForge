@@ -343,7 +343,8 @@ function showLoader(projectId, scriptId) {
     const scriptKey = encodeURIComponent(String(s.id));
     const loader =
 `-- NexForge authorized loader - ${p.name} / ${s.name}
-local license = \"PASTE_KEY_HERE\"
+
+local license = "PASTE_KEY_HERE"
 local hwid = game:GetService(\"RbxAnalyticsService\"):GetClientId()
 
 local function encode(value)
