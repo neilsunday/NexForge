@@ -16,6 +16,7 @@ const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const VERIFIED_ROLE_ID = process.env.DISCORD_VERIFIED_ROLE_ID;
 const ADMIN_ROLE_ID = process.env.DISCORD_ADMIN_ROLE_ID;
+const OWNER_ROLE_ID = process.env.DISCORD_OWNER_ROLE_ID;
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SITE_URL = process.env.SITE_URL || 'https://keyora-gyuu.onrender.com';
@@ -62,7 +63,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('resethwid')
-        .setDescription('Reset your hardware ID (24h cooldown)'),
+        .setDescription('Reset your hardware ID (15h cooldown)'),
 
     new SlashCommandBuilder()
         .setName('keyinfo')
@@ -100,6 +101,12 @@ const commands = [
                 { name: 'Private', value: 'private' },
                 { name: 'Premium', value: 'premium' }
             ))
+,
+
+    new SlashCommandBuilder()
+        .setName('forcereset')
+        .setDescription('[Owner] Force-reset a user\'s HWID (bypasses cooldown and limit)')
+        .addUserOption(opt => opt.setName('user').setDescription('User whose HWID to reset').setRequired(true))
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -133,6 +140,11 @@ async function isAdmin(interaction) {
     if (user?.is_admin) return true;
     if (ADMIN_ROLE_ID && interaction.member?.roles?.cache?.has(ADMIN_ROLE_ID)) return true;
     return false;
+}
+
+function isOwner(interaction) {
+    if (!OWNER_ROLE_ID || !interaction.member?.roles?.cache) return false;
+    return interaction.member.roles.cache.has(OWNER_ROLE_ID);
 }
 
 async function ensureUserRow(discordUser) {
@@ -217,7 +229,7 @@ function buildPanel(project) {
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID (24h)').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('panel_reset').setLabel('Reset HWID').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('panel_stats').setLabel('Session Status').setStyle(ButtonStyle.Secondary)
     );
 
@@ -310,6 +322,16 @@ client.on('interactionCreate', async (interaction) => {
                 const projectSlug = interaction.options.getString('project');
                 return handleSetRole(interaction, targetUser, projectSlug);
             }
+
+            // /forcereset (owner only) - bypass HWID cooldown and reset limit
+            if (cmd === 'forcereset') {
+                await interaction.deferReply({ ephemeral: true });
+                if (!isOwner(interaction)) {
+                    return interaction.editReply({ embeds: [embed('Access Denied', 'Owner only.', 0xef4444)] });
+                }
+                const targetUser = interaction.options.getUser('user');
+                return handleForceReset(interaction, targetUser);
+            }
         }
 
         // ============ BUTTON CLICKS ============
@@ -355,7 +377,7 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({
                     embeds: [embed('Confirm Reset',
                         'This will unlink your license from the current device.\n' +
-                        '**Cooldown:** 24 hours between resets.\n' +
+                        '**Cooldown:** 15 hours between resets.\n' +
                         '**Limit:** 5 resets total per key.', 0xf59e0b)],
                     components: [confirmRow],
                     ephemeral: true
@@ -612,8 +634,8 @@ async function handleResetHwid(interaction, fromButton) {
 
     if (key.last_hwid_reset) {
         const hrs = (new Date() - new Date(key.last_hwid_reset)) / 3600000;
-        if (hrs < 24) {
-            const msg = { embeds: [embed('Cooldown Active', 'Wait **' + Math.ceil(24 - hrs) + ' hours** before resetting.', 0xf59e0b)], components: [] };
+        if (hrs < 15) {
+            const msg = { embeds: [embed('Cooldown Active', 'Wait **' + Math.ceil(15 - hrs) + ' hours** before resetting.', 0xf59e0b)], components: [] };
             return fromButton ? interaction.editReply(msg) : interaction.editReply(msg);
         }
     }
@@ -788,6 +810,41 @@ async function handleSetRole(interaction, targetUser, projectSlug) {
 
     return interaction.editReply({ embeds: [embed('Role Assigned',
         '<@' + targetUser.id + '> now has the **' + projectSlug.charAt(0).toUpperCase() + projectSlug.slice(1) + '** role.', 0x10b981)] });
+}
+
+async function handleForceReset(interaction, targetUser) {
+    const { data: user } = await sb.from('users').select('*').eq('discord_id', targetUser.id).maybeSingle();
+    if (!user) return interaction.editReply({ embeds: [embed('Not Found', targetUser.username + ' has no account.', 0xef4444)] });
+
+    const { data: key } = await sb.from('keys').select('*').eq('user_id', user.id).eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!key) return interaction.editReply({ embeds: [embed('No Active License', targetUser.username + ' has no active license.', 0xef4444)] });
+
+    // Bypass cooldown AND reset the counter back to 0 (owner privilege)
+    const { error } = await sb.from('keys').update({
+        hwid: null,
+        hwid_reset_count: 0,
+        last_hwid_reset: new Date().toISOString()
+    }).eq('key', key.key);
+
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    const owner = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: owner?.id, key: key.key,
+        action: 'owner_force_reset', status: 'success',
+        metadata: {
+            message: 'HWID force-reset by owner ' + interaction.user.username + ' for ' + targetUser.username,
+            target_discord_id: targetUser.id,
+            source: 'discord'
+        }
+    });
+
+    return interaction.editReply({ embeds: [embed('Force Reset Complete',
+        'HWID cleared for <@' + targetUser.id + '>.\n' +
+        '**Cooldown:** bypassed\n' +
+        '**Reset counter:** restored to 0/5\n' +
+        '**Key:** \`' + key.key + '\`', 0x10b981)] });
 }
 
 // ========== Startup ==========
