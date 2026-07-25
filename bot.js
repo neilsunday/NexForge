@@ -1295,11 +1295,157 @@ async function handleUnblacklist(interaction, targetUser) {
         '<@' + targetUser.id + '> is no longer blacklisted.', 0x10b981)] });
 }
 
+// ========== Expiry Notifier ==========
+// Runs daily. DMs users when their key is about to expire.
+// Sends at: 3 days before, 1 day before, and day-of expiry.
+// Uses expiry_notified_at column to prevent duplicate spam.
+
+async function checkExpiringKeys() {
+    if (!sb || !client.isReady()) return;
+
+    try {
+        const now = new Date();
+        const fourDaysFromNow = new Date(now.getTime() + 4 * 86400000);
+
+        // Find all active keys expiring within the next 4 days
+        const { data: keys, error } = await sb.from('keys')
+            .select('*, users!keys_user_id_fkey(discord_id, username)')
+            .eq('status', 'active')
+            .not('expires_at', 'is', null)
+            .not('user_id', 'is', null)
+            .lte('expires_at', fourDaysFromNow.toISOString())
+            .gte('expires_at', now.toISOString());
+
+        if (error) { console.error('Expiry check query failed:', error); return; }
+        if (!keys || keys.length === 0) return;
+
+        let notified = 0;
+        for (const key of keys) {
+            const discordId = key.users?.discord_id;
+            if (!discordId) continue;
+
+            const expiresAt = new Date(key.expires_at);
+            const hoursLeft = (expiresAt - now) / 3600000;
+            const daysLeft = Math.ceil(hoursLeft / 24);
+
+            // Determine which milestone we hit
+            let milestone = null;
+            if (daysLeft <= 0) milestone = 'today';
+            else if (daysLeft === 1) milestone = '1day';
+            else if (daysLeft <= 3) milestone = '3day';
+            if (!milestone) continue;
+
+            // Skip if already notified for THIS milestone
+            // We store the milestone tag in expiry_notified_at's associated metadata via a compact scheme:
+            // format = "<milestone>|<ISO timestamp>"
+            const lastNote = key.expiry_notified_at || '';
+            if (lastNote.startsWith(milestone + '|')) continue;
+
+            // Fetch the Discord user and DM them
+            try {
+                const user = await client.users.fetch(discordId);
+                const projectName = await getProjectNameForKey(key);
+
+                let title, color, urgency;
+                if (milestone === 'today') {
+                    title = 'License Expires Today';
+                    color = 0xef4444;
+                    urgency = 'Your license expires **today**. Renew now to keep access.';
+                } else if (milestone === '1day') {
+                    title = 'License Expires Tomorrow';
+                    color = 0xf59e0b;
+                    urgency = 'Your license expires in **1 day**. Renew soon to avoid interruption.';
+                } else {
+                    title = 'License Expiring Soon';
+                    color = 0xf59e0b;
+                    urgency = 'Your license expires in **' + daysLeft + ' days**.';
+                }
+
+                await user.send({
+                    embeds: [embed(title,
+                        urgency + '\n\n' +
+                        '**Key:** `' + key.key + '`\n' +
+                        '**Plan:** ' + key.plan.toUpperCase() + '\n' +
+                        (projectName ? '**Project:** ' + projectName + '\n' : '') +
+                        '**Expires:** ' + expiresAt.toLocaleString('en-US', {
+                            month: 'long', day: 'numeric', year: 'numeric',
+                            hour: 'numeric', minute: '2-digit'
+                        }) + '\n\n' +
+                        'Contact an admin to renew or purchase a new key.',
+                        color)]
+                });
+
+                // Mark this milestone as notified
+                await sb.from('keys').update({
+                    expiry_notified_at: milestone + '|' + now.toISOString()
+                }).eq('key', key.key);
+
+                notified++;
+            } catch (dmErr) {
+                // User has DMs closed or is unreachable - log and skip
+                console.warn('Expiry DM failed for ' + discordId + ':', dmErr.message);
+            }
+        }
+
+        if (notified > 0) {
+            console.log('Expiry notifier: sent ' + notified + ' DMs (out of ' + keys.length + ' expiring keys)');
+        }
+    } catch (err) {
+        console.error('Expiry notifier crashed:', err);
+    }
+}
+
+async function getProjectNameForKey(key) {
+    if (!key.project_id) return null;
+    try {
+        const { data } = await sb.from('projects').select('name').eq('id', key.project_id).maybeSingle();
+        return data?.name || null;
+    } catch (_) { return null; }
+}
+
+// Also auto-mark expired keys as 'expired' status (housekeeping)
+async function markExpiredKeys() {
+    if (!sb) return;
+    try {
+        const { data, error } = await sb.from('keys')
+            .update({ status: 'expired' })
+            .eq('status', 'active')
+            .not('expires_at', 'is', null)
+            .lt('expires_at', new Date().toISOString())
+            .select('key');
+        if (error) { console.error('Mark expired failed:', error); return; }
+        if (data && data.length > 0) {
+            console.log('Marked ' + data.length + ' keys as expired');
+        }
+    } catch (err) {
+        console.error('markExpiredKeys crashed:', err);
+    }
+}
+
+// Run the notifier every 6 hours, and once at startup after a short delay.
+// (Every 6h so if the bot restarts it still catches the daily milestones without spamming.)
+function startExpiryScheduler() {
+    // Initial run 60s after startup to let everything settle
+    setTimeout(async () => {
+        await markExpiredKeys();
+        await checkExpiringKeys();
+    }, 60_000);
+
+    // Then every 6 hours
+    setInterval(async () => {
+        await markExpiredKeys();
+        await checkExpiringKeys();
+    }, 6 * 60 * 60 * 1000);
+
+    console.log('Expiry scheduler started (checks every 6h, first run in 60s)');
+}
+
 // ========== Startup ==========
 client.once('clientReady', async () => {
     console.log('NexaKS bot logged in as ' + client.user.tag);
     global.botStatus = 'online (' + client.user.tag + ')';
     await registerCommands();
+    startExpiryScheduler();
 });
 
 client.on('error', (err) => {
