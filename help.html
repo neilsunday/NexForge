@@ -141,7 +141,7 @@
                     </table>
 
                     <h3>Panel Buttons</h3>
-                    <p>Admins post an interactive panel with these buttons - no typing needed:</p>
+                    <p>Admins post an interactive panel with these buttons - no typing needed. Panels can be tied to a specific project (e.g. <code>/setup-panel project:autoparry</code>) so <strong>Get Script</strong> serves the right loader for that channel:</p>
                     <ul>
                         <li><strong>Redeem Key</strong> - opens a form to paste your key</li>
                         <li><strong>Get Role</strong> - assigns the Verified role once you have an active key</li>
@@ -267,17 +267,20 @@ WHERE discord_id = 'YOUR_DISCORD_USER_ID';</pre>
                     <table class="cmd-table" style="width:100%;">
                         <tbody>
                             <tr><td><code>/setup-panel project:SLUG</code></td><td>Post the interactive panel, optionally tied to a project.</td></tr>
-                            <tr><td><code>/generate plan:pro duration:30 quantity:5</code></td><td>Generate license keys. Durations: 1, 7, 30, 90, 365, or lifetime.</td></tr>
+                            <tr><td><code>/generate plan:pro duration:30 quantity:5 project:SLUG</code></td><td>Generate license keys. Add <code>project:SLUG</code> to tie keys to a specific project (recommended). Durations: 1, 7, 30, 90, 365, or lifetime.</td></tr>
                             <tr><td><code>/revoke key:NXKS-...</code></td><td>Revoke a key - user loses access immediately.</td></tr>
                             <tr><td><code>/lookup user:@name</code></td><td>Look up a user's account, keys, and status.</td></tr>
                         </tbody>
                     </table>
 
                     <h3>Attaching keys to a project</h3>
-                    <p>Keys generated via <code>/generate</code> aren't automatically linked to a project. Run this in Supabase to link them:</p>
+                    <p>The easiest way: pass <code>project:SLUG</code> when generating keys, and they'll be auto-linked:</p>
+                    <pre>/generate plan:pro duration:30 quantity:5 project:autoparry</pre>
+                    <p>To re-link an existing key (or one generated before this feature), run in Supabase:</p>
                     <pre>UPDATE keys
 SET project_id = (SELECT id FROM projects WHERE slug = 'YOUR_SLUG')
 WHERE key = 'NXKS-XXXX-XXXX-XXXX-XXXX';</pre>
+                    <div class="callout"><strong>Multi-project channels:</strong> post one panel per project channel using <code>/setup-panel project:SLUG</code>. When a user clicks <strong>Get Script</strong>, they only get the loader for that panel's project - and only if they own a key attached to it.</div>
                 </div>
 
                 <!-- ============ TROUBLESHOOTING ============ -->
