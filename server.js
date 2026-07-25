@@ -47,14 +47,83 @@ setInterval(() => {
     for (const [k, v] of _rl) if (now > v.reset) _rl.delete(k);
 }, 60000).unref?.();
 
-// ---- Lua-safe string literal encoder (prevents loader injection) ----
-function luaStr(s) {
-    // JSON.stringify produces a valid double-quoted literal with all
-    // control chars, quotes and backslashes escaped. Lua accepts the
-    // same escapes (\", \\, \n, \r, \t, \uXXXX). No hand-managed slashes.
-    return JSON.stringify(String(s == null ? '' : s));
+// ---- Lua-safe string literal encoder (prevents runtime-context injection) ----
+function luaStr(value) {
+    const bytes = Buffer.from(String(value == null ? '' : value), 'utf8');
+    let out = '"';
+    for (const byte of bytes) {
+        if (byte === 34) out += '\\"';
+        else if (byte === 92) out += '\\\\';
+        else if (byte === 10) out += '\\n';
+        else if (byte === 13) out += '\\r';
+        else if (byte === 9) out += '\\t';
+        else if (byte === 8) out += '\\b';
+        else if (byte === 12) out += '\\f';
+        else if (byte >= 32 && byte <= 126) out += String.fromCharCode(byte);
+        else out += '\\' + String(byte).padStart(3, '0');
+    }
+    return out + '"';
 }
 function luaError(msg) { return 'error(' + luaStr('NexaKS: ' + msg) + ')'; }
+
+function secondsLeft(expiresAt) {
+    if (!expiresAt) return -1;
+    const expires = Date.parse(expiresAt);
+    if (!Number.isFinite(expires)) return 0;
+    return Math.max(0, Math.floor((expires - Date.now()) / 1000));
+}
+
+function userNote(key) {
+    if (!key) return '';
+    const metadata = key.metadata && typeof key.metadata === 'object' ? key.metadata : {};
+    return String(metadata.note ?? key.note ?? '').slice(0, 1000);
+}
+
+function linkedDiscordId(key) {
+    if (!key) return '';
+    const metadata = key.metadata && typeof key.metadata === 'object' ? key.metadata : {};
+    return String(metadata.discord_id ?? key.discord_id ?? key.users?.discord_id ?? '').slice(0, 128);
+}
+
+function licenseStatus(key, mode) {
+    if (mode === 'ffa') return 'ffa';
+    if (!key) return 'legacy';
+    return String(key.status || 'active').toLowerCase();
+}
+
+function isPremium(key) {
+    if (!key) return false;
+    const plan = String(key.plan || '').toLowerCase();
+    return plan !== '' && plan !== 'free' && plan !== 'ffa';
+}
+
+function buildRuntimePreamble(projectRow, scriptRow, key, options = {}) {
+    const mode = options.mode || (key ? 'key' : (projectRow ? 'ffa' : 'legacy'));
+    const totalExecutions = Math.max(0, Number(options.totalExecutions ?? key?.execution_count ?? 0) || 0);
+    const published = scriptRow?.published_version || null;
+    const values = [
+        ['NXIsPremium', isPremium(key) ? 'true' : 'false'],
+        ['NXLinkedDiscordID', luaStr(linkedDiscordId(key))],
+        ['NXScriptName', luaStr(scriptRow?.name || projectRow?.name || 'NexForge Script')],
+        ['NXTotalExecutions', String(Math.floor(totalExecutions))],
+        ['NXSecondsLeft', String(mode === 'ffa' ? 0 : secondsLeft(key?.expires_at))],
+        ['NXUserNote', luaStr(userNote(key))],
+        ['NXScriptVersion', luaStr(published?.version || scriptRow?.version || projectRow?.version || '')],
+        ['NXProjectID', luaStr(projectRow?.id || '')],
+        ['NX_LicenseStatus', luaStr(licenseStatus(key, mode))]
+    ];
+    return '-- NexForge runtime context (server generated)\n' +
+        values.map(([name, value]) => name + ' = ' + value).join('\n') + '\n\n';
+}
+
+function setPrivateNoStore(res) {
+    res.set({
+        'Cache-Control': 'private, no-store, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-Content-Type-Options': 'nosniff'
+    });
+}
 
 // ---- Verify status codes (machine-readable, logged internally) ----
 const VC = {
@@ -809,11 +878,108 @@ app.get('/api/admin/logs', requireAdmin, async (req, res) => {
     res.json({ logs: data || [] });
 });
 
+
+
+// ================================================================
+// ============  /api/status - ACCESS STATUS ONLY =================
+// Does not return source, bind HWIDs, increment counters, or write usage logs.
+// ================================================================
+app.get('/api/status', async (req, res) => {
+    setPrivateNoStore(res);
+    if (!sb) return res.status(503).json({ ok: false, code: 'INTERNALERROR', message: VC.INTERNAL_ERROR });
+
+    const projectKey = typeof req.query.project === 'string' ? req.query.project.trim() : '';
+    const scriptId = typeof req.query.script === 'string' ? req.query.script.trim() : '';
+    const licenseUpper = typeof req.query.license === 'string'
+        ? req.query.license.trim().toUpperCase().substring(0, 64) : '';
+    const hwidClean = typeof req.query.hwid === 'string' ? req.query.hwid.trim().substring(0, 128) : '';
+    const safeId = (value) => /^[A-Za-z0-9._:\-]{1,128}$/.test(value);
+    const deny = (status, code) => res.status(status).json({ ok: false, code, message: VC[code] || 'Access denied' });
+
+    if (!projectKey || !safeId(projectKey) || !hwidClean)
+        return deny(400, 'INVALID_REQUEST');
+    if (!rateLimit('s:' + (req.ip || 'unknown') + ':' + licenseUpper, 60, 60000))
+        return deny(429, 'RATE_LIMITED');
+
+    try {
+        const { data: projectRow } = await sb.from('projects').select('*')
+            .eq('api_key', projectKey).maybeSingle();
+        if (!projectRow) return deny(404, 'PROJECT_NOT_FOUND');
+        if (projectRow.status !== 'active' || projectRow.archived) return deny(403, 'PROJECT_DISABLED');
+
+        let scriptRow = null;
+        if (scriptId) {
+            if (!safeId(scriptId)) return deny(404, 'SCRIPT_NOT_FOUND');
+            const { data } = await sb.from('project_scripts')
+                .select('id, name, version, enabled, status, published_version_id, deleted_at, published_version:script_versions!project_scripts_published_version_fkey(id, version, state, published_at)')
+                .eq('id', scriptId).eq('project_id', projectRow.id).is('deleted_at', null).maybeSingle();
+            if (!data) return deny(404, 'SCRIPT_NOT_FOUND');
+            if (!data.enabled || data.status === 'disabled') return deny(403, 'SCRIPT_DISABLED');
+            if (!data.published_version_id || !data.published_version) return deny(409, 'SCRIPT_NOT_PUBLISHED');
+            scriptRow = data;
+        }
+
+        const settings = projectRow.settings || {};
+        const ffa = settings?.access?.mode === 'ffa' || settings?.ffa === true;
+        if (ffa) {
+            const { data: rows } = await sb.from('project_blacklist').select('type, identifier, ban_expire')
+                .eq('project_id', projectRow.id).eq('type', 'hwid').eq('identifier', hwidClean).limit(1);
+            const now = new Date().toISOString();
+            if ((rows || []).some(row => !row.ban_expire || row.ban_expire > now)) return deny(403, 'KEY_BANNED');
+            return res.json({
+                ok: true, code: 'OK', license_status: 'ffa', project_id: projectRow.id,
+                script_id: scriptRow?.id || null, script_name: scriptRow?.name || null,
+                script_version: scriptRow?.published_version?.version || null,
+                is_premium: false, linked_discord_id: '', total_executions: 0,
+                seconds_left: 0, user_note: ''
+            });
+        }
+
+        if (!licenseUpper) return deny(401, 'KEY_REQUIRED');
+        const { data: key } = await sb.from('keys')
+            .select('*, users!keys_user_id_fkey(username, is_banned)')
+            .eq('key', licenseUpper).eq('project_id', projectRow.id).maybeSingle();
+        if (!key) return deny(401, 'KEY_INCORRECT');
+        if (key.users?.is_banned || key.status === 'banned') return deny(403, 'KEY_BANNED');
+        if (key.status === 'revoked') return deny(403, 'KEY_REVOKED');
+        if (key.status === 'unclaimed' || key.status === 'unassigned') return deny(403, 'KEY_UNASSIGNED');
+        if (key.status === 'expired' || (key.expires_at && new Date(key.expires_at) < new Date()))
+            return deny(403, 'KEY_EXPIRED');
+        if (key.hwid && key.hwid !== hwidClean) return deny(403, 'KEY_HWID_LOCKED');
+
+        const maxExec = settings?.access?.max_executions ?? settings?.max_executions ?? 0;
+        if (maxExec > 0 && (key.execution_count || 0) >= maxExec) return deny(403, 'EXECUTION_LIMIT_REACHED');
+
+        const now = new Date().toISOString();
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        const wanted = [['key', licenseUpper], ['hwid', hwidClean], ['ip', clientIp]];
+        const { data: blocked } = await sb.from('project_blacklist').select('type, identifier, ban_expire')
+            .eq('project_id', projectRow.id).limit(500);
+        if ((blocked || []).some(row => wanted.some(([type, value]) => row.type === type && row.identifier === value) &&
+            (!row.ban_expire || row.ban_expire > now))) return deny(403, 'KEY_BANNED');
+
+        return res.json({
+            ok: true, code: 'OK', license_status: licenseStatus(key, 'key'),
+            project_id: projectRow.id, script_id: scriptRow?.id || null,
+            script_name: scriptRow?.name || null,
+            script_version: scriptRow?.published_version?.version || null,
+            is_premium: isPremium(key), linked_discord_id: linkedDiscordId(key),
+            total_executions: Math.max(0, Number(key.execution_count || 0)),
+            seconds_left: secondsLeft(key.expires_at), user_note: userNote(key),
+            hwid_bound: !!key.hwid
+        });
+    } catch (err) {
+        console.error('Status error:', err);
+        return res.status(500).json({ ok: false, code: 'INTERNALERROR', message: VC.INTERNAL_ERROR });
+    }
+});
+
 // ================================================================
 // ============  /api/verify — LUA LOADER ENDPOINT ================
 // Enhanced to route by project (backward compatible)
 // ================================================================
 app.get('/api/verify', async (req, res) => {
+    setPrivateNoStore(res);
     const { license, hwid, project } = req.query;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
     const scriptId = (req.query.script || '').trim();
@@ -887,7 +1053,7 @@ app.get('/api/verify', async (req, res) => {
                 .select('type, identifier, reason, ban_expire')
                 .eq('project_id', projectRow.id).eq('type', 'hwid').eq('identifier', hwidClean).limit(1);
             if ((bl || []).some(b => !b.ban_expire || b.ban_expire > now)) return fail('KEY_BANNED', projectRow.id);
-            const payload = buildPayload(projectRow, scriptRow, null);
+            const payload = buildPayload(projectRow, scriptRow, null, { mode: 'ffa', totalExecutions: 0 });
             await writeProjectLog(projectRow.id, scriptRow?.id || null, 'verify_success', 'success', 'FFA execution', clientIp, hwidClean);
             return res.status(200).type('text/plain').send(payload);
         }
@@ -957,16 +1123,17 @@ app.get('/api/verify', async (req, res) => {
         }
 
         // ---- 13. HWID bind or compare ----
+        const nextExecutionCount = (key.execution_count || 0) + 1;
         if (!key.hwid) {
             await sb.from('keys').update({
-                hwid: hwidClean, execution_count: (key.execution_count || 0) + 1, last_used: new Date().toISOString()
+                hwid: hwidClean, execution_count: nextExecutionCount, last_used: new Date().toISOString()
             }).eq('key', licenseUpper);
             if (projectRow) await writeProjectLog(projectRow.id, key.id, 'hwid_bind', 'success', 'HWID bound', clientIp, hwidClean);
         } else if (key.hwid !== hwidClean) {
             return fail('KEY_HWID_LOCKED', projectRow?.id, key.id);
         } else {
             await sb.from('keys').update({
-                execution_count: (key.execution_count || 0) + 1, last_used: new Date().toISOString()
+                execution_count: nextExecutionCount, last_used: new Date().toISOString()
             }).eq('key', licenseUpper);
         }
 
@@ -980,7 +1147,9 @@ app.get('/api/verify', async (req, res) => {
                 .eq('id', scriptRow.id).then(() => {}, () => {});
             sb.from('keys').update({ last_script_id: scriptRow.id }).eq('key', licenseUpper).then(() => {}, () => {});
         }
-        return res.status(200).type('text/plain').send(buildPayload(projectRow, scriptRow, key));
+        return res.status(200).type('text/plain').send(
+            buildPayload(projectRow, scriptRow, key, { mode: 'key', totalExecutions: nextExecutionCount })
+        );
 
     } catch (err) {
         console.error('Verify error:', err);
@@ -989,15 +1158,17 @@ app.get('/api/verify', async (req, res) => {
     }
 });
 
-// Build the Lua payload for a resolved script (project script > legacy > plan > fallback)
-function buildPayload(projectRow, scriptRow, key) {
+// Build the Lua payload for a resolved script (published script > legacy > fallback).
+// Draft project_scripts.script_content is never served publicly.
+function buildPayload(projectRow, scriptRow, key, options = {}) {
+    let source = null;
     if (scriptRow?.published_version?.source_content)
-        return scriptRow.published_version.source_content;
-    // Backward compatibility applies only to legacy project records without
-    // a project_scripts row. Draft source is never served publicly.
-    if (!scriptRow && projectRow?.script_content) return projectRow.script_content;
-    if (key) { /* legacy plan-based handled by caller via fetchScriptForKey */ }
-    return fallbackPayload(key || { key: '', plan: 'free' });
+        source = scriptRow.published_version.source_content;
+    else if (!scriptRow && projectRow?.script_content)
+        source = projectRow.script_content;
+    else
+        source = fallbackPayload(key || { key: '', plan: 'free' });
+    return buildRuntimePreamble(projectRow, scriptRow, key, options) + String(source || '');
 }
 
 // ---- Helpers (existing) ----
