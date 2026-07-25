@@ -51,62 +51,105 @@ const client = new Client({
 
 // ========== Commands ==========
 const commands = [
+    // ---- panel bootstrap (kept from original) ----
     new SlashCommandBuilder()
         .setName('setup-panel')
         .setDescription('[Admin] Post the NexaKS interactive panel in this channel')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(opt => opt.setName('project').setDescription('Project slug (ties panel to one project)').setRequired(false)),
 
+    // ========== USER COMMANDS ==========
     new SlashCommandBuilder()
         .setName('redeem')
-        .setDescription('Redeem a NexaKS license key')
+        .setDescription('Redeem a key')
         .addStringOption(opt => opt.setName('key').setDescription('Your license key').setRequired(true)),
 
     new SlashCommandBuilder()
+        .setName('loader')
+        .setDescription('Get your loader script'),
+
+    new SlashCommandBuilder()
+        .setName('script')
+        .setDescription('Get the latest script'),
+
+    new SlashCommandBuilder()
         .setName('resethwid')
-        .setDescription('Reset your hardware ID (15h cooldown)'),
+        .setDescription('Reset your HWID (every 15 hours)'),
 
     new SlashCommandBuilder()
-        .setName('keyinfo')
-        .setDescription('View your active license details'),
+        .setName('claimrole')
+        .setDescription('Claim your buyer role'),
 
     new SlashCommandBuilder()
-        .setName('generate')
-        .setDescription('[Admin] Generate license keys')
-        .addStringOption(opt => opt.setName('plan').setDescription('Plan').setRequired(true)
-            .addChoices({name:'Free',value:'free'},{name:'Pro',value:'pro'},{name:'Enterprise',value:'enterprise'}))
-        .addStringOption(opt => opt.setName('duration').setDescription('Duration').setRequired(true)
-            .addChoices({name:'1 day',value:'1'},{name:'7 days',value:'7'},{name:'30 days',value:'30'},
-                {name:'90 days',value:'90'},{name:'1 year',value:'365'},{name:'Lifetime',value:'lifetime'}))
-        .addIntegerOption(opt => opt.setName('quantity').setDescription('Quantity').setMinValue(1).setMaxValue(50))
-        .addStringOption(opt => opt.setName('project').setDescription('Project slug (ties keys to a specific project)').setRequired(false)),
+        .setName('key')
+        .setDescription('Manage license keys')
+        // ---- user-facing subcommand ----
+        .addSubcommand(sc => sc.setName('view').setDescription('View your redeemed key'))
+        // ---- admin subcommands ----
+        .addSubcommand(sc => sc.setName('create').setDescription('[Admin] Generate a key')
+            .addStringOption(o => o.setName('plan').setDescription('Plan').setRequired(true)
+                .addChoices({name:'Free',value:'free'},{name:'Pro',value:'pro'},{name:'Enterprise',value:'enterprise'}))
+            .addStringOption(o => o.setName('duration').setDescription('Duration').setRequired(true)
+                .addChoices({name:'1 day',value:'1'},{name:'7 days',value:'7'},{name:'30 days',value:'30'},
+                    {name:'90 days',value:'90'},{name:'1 year',value:'365'},{name:'Lifetime',value:'lifetime'}))
+            .addIntegerOption(o => o.setName('quantity').setDescription('Quantity').setMinValue(1).setMaxValue(50))
+            .addStringOption(o => o.setName('project').setDescription('Project slug').setRequired(false)))
+        .addSubcommand(sc => sc.setName('delete').setDescription('[Admin] Delete a key')
+            .addStringOption(o => o.setName('key').setDescription('Key to delete').setRequired(true)))
+        .addSubcommand(sc => sc.setName('extend').setDescription('[Admin] Extend a key')
+            .addStringOption(o => o.setName('key').setDescription('Key to extend').setRequired(true))
+            .addIntegerOption(o => o.setName('days').setDescription('Additional days').setRequired(true).setMinValue(1).setMaxValue(3650)))
+        .addSubcommand(sc => sc.setName('revoke').setDescription('[Admin] Revoke a key')
+            .addStringOption(o => o.setName('key').setDescription('Key to revoke').setRequired(true)))
+        .addSubcommand(sc => sc.setName('info').setDescription('[Admin] View key information')
+            .addStringOption(o => o.setName('key').setDescription('Key to inspect').setRequired(true))),
 
     new SlashCommandBuilder()
-        .setName('revoke')
-        .setDescription('[Admin] Revoke a license key')
-        .addStringOption(opt => opt.setName('key').setDescription('Key to revoke').setRequired(true)),
+        .setName('project')
+        .setDescription('Project commands')
+        // ---- user-facing subcommand ----
+        .addSubcommand(sc => sc.setName('view').setDescription('View your current project'))
+        // ---- admin subcommands ----
+        .addSubcommand(sc => sc.setName('create').setDescription('[Admin] Create a project')
+            .addStringOption(o => o.setName('slug').setDescription('Project slug (lowercase, no spaces)').setRequired(true))
+            .addStringOption(o => o.setName('name').setDescription('Display name').setRequired(true)))
+        .addSubcommand(sc => sc.setName('delete').setDescription('[Admin] Delete a project')
+            .addStringOption(o => o.setName('slug').setDescription('Project slug').setRequired(true)))
+        .addSubcommand(sc => sc.setName('list').setDescription('[Admin] View all projects')),
 
     new SlashCommandBuilder()
-        .setName('lookup')
-        .setDescription('[Admin] Look up a user')
-        .addUserOption(opt => opt.setName('user').setDescription('Discord user').setRequired(true))
-,
+        .setName('subscription')
+        .setDescription('Check your plan'),
 
     new SlashCommandBuilder()
-        .setName('setrole')
-        .setDescription('[Admin] Manually assign a project role to a user')
-        .addUserOption(opt => opt.setName('user').setDescription('Discord user').setRequired(true))
-        .addStringOption(opt => opt.setName('project').setDescription('Which role').setRequired(true)
-            .addChoices(
-                { name: 'Macro', value: 'macro' },
-                { name: 'Private', value: 'private' },
-                { name: 'Premium', value: 'premium' }
-            ))
-,
+        .setName('profile')
+        .setDescription('View your account information'),
 
     new SlashCommandBuilder()
-        .setName('forcereset')
-        .setDescription('[Owner] Force-reset a user\'s HWID (bypasses cooldown and limit)')
-        .addUserOption(opt => opt.setName('user').setDescription('User whose HWID to reset').setRequired(true))
+        .setName('help')
+        .setDescription('Show all commands'),
+
+    new SlashCommandBuilder()
+        .setName('status')
+        .setDescription('Check service status'),
+
+    // ========== ADMIN COMMANDS ==========
+    new SlashCommandBuilder()
+        .setName('user')
+        .setDescription('[Admin] User management')
+        .addSubcommand(sc => sc.setName('info').setDescription('View user information')
+            .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true)))
+        .addSubcommand(sc => sc.setName('blacklist').setDescription('Blacklist a user')
+            .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
+            .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
+        .addSubcommand(sc => sc.setName('unblacklist').setDescription('Remove blacklist')
+            .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))),
+
+    new SlashCommandBuilder()
+        .setName('hwid')
+        .setDescription('[Admin] HWID management')
+        .addSubcommand(sc => sc.setName('reset').setDescription('Force reset HWID')
+            .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))),
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -245,6 +288,7 @@ client.on('interactionCreate', async (interaction) => {
         // ============ SLASH COMMANDS ============
         if (interaction.isChatInputCommand()) {
             const cmd = interaction.commandName;
+            const sub = interaction.options.getSubcommand(false);
 
             // /setup-panel (admin only)
             if (cmd === 'setup-panel') {
@@ -263,77 +307,148 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
-            // /redeem (traditional slash)
+            // ---------- USER COMMANDS ----------
             if (cmd === 'redeem') {
                 await interaction.deferReply({ ephemeral: true });
                 const key = interaction.options.getString('key').trim().toUpperCase();
                 return handleRedeem(interaction, key);
             }
 
-            // /resethwid
+            if (cmd === 'loader') {
+                await interaction.deferReply({ ephemeral: true });
+                return handleGetScript(interaction, null);
+            }
+
+            if (cmd === 'script') {
+                await interaction.deferReply({ ephemeral: true });
+                return handleGetScript(interaction, null);
+            }
+
             if (cmd === 'resethwid') {
                 await interaction.deferReply({ ephemeral: true });
                 return handleResetHwid(interaction);
             }
 
-            // /keyinfo
-            if (cmd === 'keyinfo') {
+            if (cmd === 'claimrole') {
                 await interaction.deferReply({ ephemeral: true });
-                return handleKeyInfo(interaction);
+                return handleGetRole(interaction);
             }
 
-            // /generate (admin)
-            if (cmd === 'generate') {
+            if (cmd === 'subscription') {
                 await interaction.deferReply({ ephemeral: true });
+                return handleSubscription(interaction);
+            }
+
+            if (cmd === 'profile') {
+                await interaction.deferReply({ ephemeral: true });
+                return handleProfile(interaction);
+            }
+
+            if (cmd === 'help') {
+                await interaction.deferReply({ ephemeral: true });
+                return handleHelp(interaction);
+            }
+
+            if (cmd === 'status') {
+                await interaction.deferReply({ ephemeral: true });
+                return handleStatus(interaction);
+            }
+
+            // ---------- /key group ----------
+            if (cmd === 'key') {
+                await interaction.deferReply({ ephemeral: true });
+
+                if (sub === 'view') {
+                    return handleKeyInfo(interaction); // user's own key
+                }
+
+                // remaining subcommands are admin-only
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
-                const plan = interaction.options.getString('plan');
-                const duration = interaction.options.getString('duration');
-                const qty = interaction.options.getInteger('quantity') || 1;
-                const projSlug = interaction.options.getString('project');
-                return handleGenerate(interaction, plan, duration, qty, projSlug);
+
+                if (sub === 'create') {
+                    const plan = interaction.options.getString('plan');
+                    const duration = interaction.options.getString('duration');
+                    const qty = interaction.options.getInteger('quantity') || 1;
+                    const projSlug = interaction.options.getString('project');
+                    return handleGenerate(interaction, plan, duration, qty, projSlug);
+                }
+                if (sub === 'delete') {
+                    const key = interaction.options.getString('key').trim().toUpperCase();
+                    return handleKeyDelete(interaction, key);
+                }
+                if (sub === 'extend') {
+                    const key = interaction.options.getString('key').trim().toUpperCase();
+                    const days = interaction.options.getInteger('days');
+                    return handleKeyExtend(interaction, key, days);
+                }
+                if (sub === 'revoke') {
+                    const key = interaction.options.getString('key').trim().toUpperCase();
+                    return handleRevoke(interaction, key);
+                }
+                if (sub === 'info') {
+                    const key = interaction.options.getString('key').trim().toUpperCase();
+                    return handleKeyLookup(interaction, key);
+                }
             }
 
-            // /revoke (admin)
-            if (cmd === 'revoke') {
+            // ---------- /project group ----------
+            if (cmd === 'project') {
                 await interaction.deferReply({ ephemeral: true });
+
+                if (sub === 'view') {
+                    return handleProjectView(interaction);
+                }
+
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
-                const key = interaction.options.getString('key').trim().toUpperCase();
-                return handleRevoke(interaction, key);
+
+                if (sub === 'create') {
+                    const slug = interaction.options.getString('slug');
+                    const name = interaction.options.getString('name');
+                    return handleProjectCreate(interaction, slug, name);
+                }
+                if (sub === 'delete') {
+                    const slug = interaction.options.getString('slug');
+                    return handleProjectDelete(interaction, slug);
+                }
+                if (sub === 'list') {
+                    return handleProjectList(interaction);
+                }
             }
 
-            // /lookup (admin)
-            if (cmd === 'lookup') {
+            // ---------- /user group (admin) ----------
+            if (cmd === 'user') {
                 await interaction.deferReply({ ephemeral: true });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
                 const targetUser = interaction.options.getUser('user');
-                return handleLookup(interaction, targetUser);
+
+                if (sub === 'info') {
+                    return handleLookup(interaction, targetUser);
+                }
+                if (sub === 'blacklist') {
+                    const reason = interaction.options.getString('reason') || 'No reason provided';
+                    return handleBlacklist(interaction, targetUser, reason);
+                }
+                if (sub === 'unblacklist') {
+                    return handleUnblacklist(interaction, targetUser);
+                }
             }
 
-            // /setrole (admin) - manually assign a project role
-            if (cmd === 'setrole') {
+            // ---------- /hwid group (admin) ----------
+            if (cmd === 'hwid') {
                 await interaction.deferReply({ ephemeral: true });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
-                const targetUser = interaction.options.getUser('user');
-                const projectSlug = interaction.options.getString('project');
-                return handleSetRole(interaction, targetUser, projectSlug);
-            }
-
-            // /forcereset (owner only) - bypass HWID cooldown and reset limit
-            if (cmd === 'forcereset') {
-                await interaction.deferReply({ ephemeral: true });
-                if (!isOwner(interaction)) {
-                    return interaction.editReply({ embeds: [embed('Access Denied', 'Owner only.', 0xef4444)] });
+                if (sub === 'reset') {
+                    const targetUser = interaction.options.getUser('user');
+                    return handleForceReset(interaction, targetUser);
                 }
-                const targetUser = interaction.options.getUser('user');
-                return handleForceReset(interaction, targetUser);
             }
         }
 
@@ -848,6 +963,280 @@ async function handleForceReset(interaction, targetUser) {
         '**Cooldown:** bypassed\n' +
         '**Reset counter:** restored to 0/5\n' +
         '**Key:** \`' + key.key + '\`', 0x10b981)] });
+}
+
+
+// ========== New handler functions (added) ==========
+
+async function handleSubscription(interaction) {
+    const { data: user } = await sb.from('users').select('*').eq('discord_id', interaction.user.id).maybeSingle();
+    if (!user) return interaction.editReply({ embeds: [embed('No Account', 'Redeem a key first.', 0xef4444)] });
+
+    const { data: key } = await sb.from('keys').select('*').eq('user_id', user.id).eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!key) return interaction.editReply({ embeds: [embed('No Active Plan', 'You have no active subscription.', 0xef4444)] });
+
+    const expText = key.expires_at
+        ? new Date(key.expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+        : 'Lifetime';
+    const daysLeft = key.expires_at
+        ? Math.max(0, Math.ceil((new Date(key.expires_at) - new Date()) / 86400000)) + ' days'
+        : 'âˆž';
+
+    return interaction.editReply({ embeds: [embed('Your Subscription',
+        '**Plan:** ' + key.plan.toUpperCase() + '\n' +
+        '**Status:** ' + key.status + '\n' +
+        '**Expires:** ' + expText + '\n' +
+        '**Time left:** ' + daysLeft, 0x7c3aed)] });
+}
+
+async function handleProfile(interaction) {
+    const user = await ensureUserRow(interaction.user);
+    if (!user) return interaction.editReply({ embeds: [embed('Error', 'Could not load profile.', 0xef4444)] });
+
+    const { data: keys } = await sb.from('keys').select('status').eq('user_id', user.id);
+    const total = keys?.length || 0;
+    const active = (keys || []).filter(k => k.status === 'active').length;
+
+    return interaction.editReply({ embeds: [embed('Your Profile',
+        '**Username:** ' + (user.username || interaction.user.username) + '\n' +
+        '**Discord ID:** ' + interaction.user.id + '\n' +
+        '**Joined:** ' + new Date(user.created_at).toLocaleDateString() + '\n' +
+        '**Admin:** ' + (user.is_admin ? 'Yes' : 'No') + '\n' +
+        '**Blacklisted:** ' + (user.is_banned ? 'Yes' : 'No') + '\n' +
+        '**Total keys:** ' + total + ' (' + active + ' active)', 0x7c3aed)] });
+}
+
+async function handleHelp(interaction) {
+    const userCmds =
+        '`/redeem` â€” Redeem a key.\n' +
+        '`/loader` â€” Get your loader script.\n' +
+        '`/script` â€” Get the latest script.\n' +
+        '`/resethwid` â€” Reset your HWID (every 15 hours).\n' +
+        '`/claimrole` â€” Claim your buyer role.\n' +
+        '`/key view` â€” View your redeemed key.\n' +
+        '`/project view` â€” View your current project.\n' +
+        '`/subscription` â€” Check your plan.\n' +
+        '`/profile` â€” View your account information.\n' +
+        '`/help` â€” Show all commands.\n' +
+        '`/status` â€” Check service status.';
+
+    const adminCmds =
+        '`/key create` â€” Generate a key.\n' +
+        '`/key delete` â€” Delete a key.\n' +
+        '`/key extend` â€” Extend a key.\n' +
+        '`/key revoke` â€” Revoke a key.\n' +
+        '`/key info` â€” View key information.\n' +
+        '`/user info` â€” View user information.\n' +
+        '`/user blacklist` â€” Blacklist a user.\n' +
+        '`/user unblacklist` â€” Remove blacklist.\n' +
+        '`/hwid reset` â€” Force reset HWID.\n' +
+        '`/project create` â€” Create a project.\n' +
+        '`/project delete` â€” Delete a project.\n' +
+        '`/project list` â€” View all projects.';
+
+    const isAdm = await isAdmin(interaction);
+    const body = '**User Commands**\n' + userCmds + (isAdm ? '\n\n**Admin Commands**\n' + adminCmds : '');
+    return interaction.editReply({ embeds: [embed('NexaKS Commands', body, 0x7c3aed)] });
+}
+
+async function handleStatus(interaction) {
+    let dbOk = false;
+    try {
+        const { error } = await sb.from('projects').select('id').limit(1);
+        dbOk = !error;
+    } catch (_) { dbOk = false; }
+
+    const uptime = process.uptime();
+    const hrs = Math.floor(uptime / 3600);
+    const mins = Math.floor((uptime % 3600) / 60);
+
+    return interaction.editReply({ embeds: [embed('Service Status',
+        '**Bot:** ðŸŸ¢ Online\n' +
+        '**Database:** ' + (dbOk ? 'ðŸŸ¢ Connected' : 'ðŸ”´ Unreachable') + '\n' +
+        '**Uptime:** ' + hrs + 'h ' + mins + 'm\n' +
+        '**Site:** ' + SITE_URL, dbOk ? 0x10b981 : 0xf59e0b)] });
+}
+
+async function handleProjectView(interaction) {
+    const { data: user } = await sb.from('users').select('*').eq('discord_id', interaction.user.id).maybeSingle();
+    if (!user) return interaction.editReply({ embeds: [embed('No Account', 'Redeem a key first.', 0xef4444)] });
+
+    const { data: key } = await sb.from('keys').select('*').eq('user_id', user.id).eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!key) return interaction.editReply({ embeds: [embed('No Active License', 'You have no active license.', 0xef4444)] });
+    if (!key.project_id) return interaction.editReply({ embeds: [embed('No Project', 'Your key is not tied to any project.', 0xf59e0b)] });
+
+    const { data: proj } = await sb.from('projects').select('*').eq('id', key.project_id).maybeSingle();
+    if (!proj) return interaction.editReply({ embeds: [embed('Not Found', 'Project no longer exists.', 0xef4444)] });
+
+    return interaction.editReply({ embeds: [embed('Your Project',
+        '**Name:** ' + proj.name + '\n' +
+        '**Slug:** `' + proj.slug + '`\n' +
+        '**Plan:** ' + key.plan.toUpperCase(), 0x7c3aed)] });
+}
+
+async function handleProjectCreate(interaction, slug, name) {
+    const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (!cleanSlug) return interaction.editReply({ embeds: [embed('Invalid Slug', 'Slug must contain a-z, 0-9, _ or -.', 0xef4444)] });
+
+    const { data: existing } = await sb.from('projects').select('id').eq('slug', cleanSlug).maybeSingle();
+    if (existing) return interaction.editReply({ embeds: [embed('Exists', 'A project with slug `' + cleanSlug + '` already exists.', 0xef4444)] });
+
+    const admin = await ensureUserRow(interaction.user);
+    const { data, error } = await sb.from('projects').insert({
+        id: require('crypto').randomUUID(),
+        slug: cleanSlug, name: name,
+        created_by: admin?.id
+    }).select().single();
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    await sb.from('logs').insert({
+        user_id: admin?.id, action: 'admin_project_create', status: 'success',
+        metadata: { message: 'Created project ' + cleanSlug + ' by ' + interaction.user.username }
+    });
+
+    return interaction.editReply({ embeds: [embed('Project Created',
+        '**Name:** ' + data.name + '\n**Slug:** `' + data.slug + '`', 0x10b981)] });
+}
+
+async function handleProjectDelete(interaction, slug) {
+    const cleanSlug = slug.trim().toLowerCase();
+    const { data: proj } = await sb.from('projects').select('*').eq('slug', cleanSlug).maybeSingle();
+    if (!proj) return interaction.editReply({ embeds: [embed('Not Found', 'No project with slug `' + cleanSlug + '`.', 0xef4444)] });
+
+    const { error } = await sb.from('projects').delete().eq('id', proj.id);
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    const admin = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: admin?.id, action: 'admin_project_delete', status: 'success',
+        metadata: { message: 'Deleted project ' + cleanSlug + ' by ' + interaction.user.username }
+    });
+
+    return interaction.editReply({ embeds: [embed('Project Deleted', '`' + cleanSlug + '` removed.', 0x10b981)] });
+}
+
+async function handleProjectList(interaction) {
+    const { data: projects } = await sb.from('projects').select('slug, name, created_at').order('created_at', { ascending: false });
+    if (!projects || projects.length === 0) {
+        return interaction.editReply({ embeds: [embed('No Projects', 'No projects created yet.', 0xf59e0b)] });
+    }
+
+    const list = projects.map(p => 'â€¢ **' + p.name + '** â€” `' + p.slug + '`').join('\n');
+    return interaction.editReply({ embeds: [embed('All Projects (' + projects.length + ')', list, 0x7c3aed)] });
+}
+
+async function handleKeyDelete(interaction, key) {
+    const { data: existing } = await sb.from('keys').select('*').eq('key', key).maybeSingle();
+    if (!existing) return interaction.editReply({ embeds: [embed('Not Found', 'Key does not exist.', 0xef4444)] });
+
+    const { error } = await sb.from('keys').delete().eq('key', key);
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    const admin = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: admin?.id, key: key, action: 'admin_key_delete', status: 'success',
+        metadata: { message: 'Deleted key ' + key + ' by ' + interaction.user.username }
+    });
+
+    return interaction.editReply({ embeds: [embed('Key Deleted', '`' + key + '` permanently removed.', 0x10b981)] });
+}
+
+async function handleKeyExtend(interaction, key, days) {
+    const { data: existing } = await sb.from('keys').select('*').eq('key', key).maybeSingle();
+    if (!existing) return interaction.editReply({ embeds: [embed('Not Found', 'Key does not exist.', 0xef4444)] });
+
+    const base = existing.expires_at ? new Date(existing.expires_at) : new Date();
+    if (base < new Date()) base.setTime(Date.now());
+    base.setDate(base.getDate() + days);
+    const newExp = base.toISOString();
+
+    const { error } = await sb.from('keys').update({ expires_at: newExp }).eq('key', key);
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    const admin = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: admin?.id, key: key, action: 'admin_key_extend', status: 'success',
+        metadata: { message: 'Extended key ' + key + ' by ' + days + ' days by ' + interaction.user.username }
+    });
+
+    return interaction.editReply({ embeds: [embed('Key Extended',
+        '`' + key + '` extended by **' + days + '** days.\n' +
+        '**New expiry:** ' + new Date(newExp).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+        0x10b981)] });
+}
+
+async function handleKeyLookup(interaction, key) {
+    const { data: k } = await sb.from('keys').select('*').eq('key', key).maybeSingle();
+    if (!k) return interaction.editReply({ embeds: [embed('Not Found', 'Key does not exist.', 0xef4444)] });
+
+    let ownerLine = 'Unclaimed';
+    if (k.user_id) {
+        const { data: owner } = await sb.from('users').select('username, discord_id').eq('id', k.user_id).maybeSingle();
+        if (owner) ownerLine = (owner.username || 'Unknown') + ' (<@' + owner.discord_id + '>)';
+    }
+
+    let projLine = 'None';
+    if (k.project_id) {
+        const { data: proj } = await sb.from('projects').select('name, slug').eq('id', k.project_id).maybeSingle();
+        if (proj) projLine = proj.name + ' (`' + proj.slug + '`)';
+    }
+
+    const expText = k.expires_at
+        ? new Date(k.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : 'Lifetime';
+
+    return interaction.editReply({ embeds: [embed('Key Info',
+        '**Key:** `' + k.key + '`\n' +
+        '**Plan:** ' + k.plan.toUpperCase() + '\n' +
+        '**Status:** ' + k.status + '\n' +
+        '**Owner:** ' + ownerLine + '\n' +
+        '**Project:** ' + projLine + '\n' +
+        '**Expires:** ' + expText + '\n' +
+        '**HWID Resets:** ' + (k.hwid_reset_count || 0) + '/' + (k.hwid_reset_limit || 5) + '\n' +
+        '**Executions:** ' + (k.execution_count || 0), 0x7c3aed)] });
+}
+
+async function handleBlacklist(interaction, targetUser, reason) {
+    const target = await ensureUserRow(targetUser);
+    if (!target) return interaction.editReply({ embeds: [embed('Error', 'Could not load user.', 0xef4444)] });
+
+    const { error } = await sb.from('users').update({ is_banned: true }).eq('id', target.id);
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    // Revoke all their active keys
+    await sb.from('keys').update({ status: 'revoked' }).eq('user_id', target.id).eq('status', 'active');
+
+    const admin = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: admin?.id, action: 'admin_blacklist', status: 'success',
+        metadata: {
+            message: 'Blacklisted ' + targetUser.username + ' by ' + interaction.user.username,
+            target_discord_id: targetUser.id, reason: reason
+        }
+    });
+
+    return interaction.editReply({ embeds: [embed('User Blacklisted',
+        '<@' + targetUser.id + '> has been blacklisted and all active keys revoked.\n**Reason:** ' + reason,
+        0x10b981)] });
+}
+
+async function handleUnblacklist(interaction, targetUser) {
+    const { data: target } = await sb.from('users').select('*').eq('discord_id', targetUser.id).maybeSingle();
+    if (!target) return interaction.editReply({ embeds: [embed('Not Found', targetUser.username + ' has no account.', 0xef4444)] });
+
+    const { error } = await sb.from('users').update({ is_banned: false }).eq('id', target.id);
+    if (error) return interaction.editReply({ embeds: [embed('Error', error.message, 0xef4444)] });
+
+    const admin = await ensureUserRow(interaction.user);
+    await sb.from('logs').insert({
+        user_id: admin?.id, action: 'admin_unblacklist', status: 'success',
+        metadata: { message: 'Unblacklisted ' + targetUser.username + ' by ' + interaction.user.username, target_discord_id: targetUser.id }
+    });
+
+    return interaction.editReply({ embeds: [embed('Blacklist Removed',
+        '<@' + targetUser.id + '> is no longer blacklisted.', 0x10b981)] });
 }
 
 // ========== Startup ==========
