@@ -202,8 +202,9 @@
                         <div class="card-title">All Keys</div>
                         <div class="card-desc" id="keysDesc">Loading...</div>
                     </div>
-                    <div>
-                        <input type="text" class="form-input" placeholder="Search key or user..." id="keySearch" style="width:240px;max-width:100%;" oninput="filterKeys()">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="text" class="form-input" placeholder="Search key or user..." id="keySearch" style="width:200px;max-width:100%;" oninput="filterKeys()">
+                        <button class="btn btn-danger" onclick="openBulkDeleteModal()">Bulk Delete</button>
                     </div>
                 </div>
 
@@ -260,7 +261,10 @@
                         <div class="card-title">Audit Logs</div>
                         <div class="card-desc" id="logsDesc">Loading...</div>
                     </div>
-                    <button class="btn btn-ghost" onclick="loadLogs()">Refresh</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-ghost" onclick="loadLogs()">Refresh</button>
+                        <button class="btn btn-danger" onclick="openClearLogsModal()">Clear Logs</button>
+                    </div>
                 </div>
 
                 <div class="table-wrapper">
@@ -366,5 +370,64 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="js/supabase.js"></script>
     <script src="js/admin.js"></script>
+
+    <!-- Clear Logs Modal -->
+    <div class="modal-overlay" id="clearLogsModal">
+        <div class="modal">
+            <div class="modal-title">Clear Audit Logs</div>
+            <div class="modal-desc">Deletes audit log entries from the database. This cannot be undone. Choose scope carefully.</div>
+
+            <div class="form-group">
+                <label class="form-label">What to delete</label>
+                <select class="form-select" id="clearLogsScope">
+                    <option value="7">Older than 7 days (safest - keeps recent trail)</option>
+                    <option value="30">Older than 30 days</option>
+                    <option value="1">Older than 1 day</option>
+                    <option value="all">Delete ALL logs (nuclear)</option>
+                </select>
+                <div class="form-hint">Recommended: keep at least 7 days for abuse investigation.</div>
+            </div>
+
+            <div class="form-group" id="clearLogsConfirmWrap" style="display:none;">
+                <label class="form-label" style="color:var(--danger);">Type DELETE to confirm</label>
+                <input type="text" class="form-input" id="clearLogsConfirm" placeholder="DELETE" style="font-family:'JetBrains Mono',monospace;">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeClearLogsModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="executeClearLogs()">Delete Logs</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Delete Keys Modal -->
+    <div class="modal-overlay" id="bulkDeleteModal">
+        <div class="modal">
+            <div class="modal-title">Bulk Delete Keys</div>
+            <div class="modal-desc">Deletes keys from the database. <strong>Active keys are never deleted</strong> via bulk â€” use individual revoke for those.</div>
+
+            <div class="form-group">
+                <label class="form-label">Which keys to delete</label>
+                <select class="form-select" id="bulkDeleteScope">
+                    <option value="unclaimed">Unclaimed keys only (never redeemed - safe)</option>
+                    <option value="revoked">Revoked keys only (already dead)</option>
+                    <option value="expired">Expired keys only</option>
+                    <option value="unclaimed_revoked">Unclaimed + Revoked</option>
+                </select>
+                <div class="form-hint">Active keys are always preserved. This action is permanent.</div>
+            </div>
+
+            <div class="form-group" id="bulkDeleteConfirmWrap" style="display:none;">
+                <label class="form-label" style="color:var(--danger);">Type DELETE to confirm</label>
+                <input type="text" class="form-input" id="bulkDeleteConfirm" placeholder="DELETE" style="font-family:'JetBrains Mono',monospace;">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeBulkDeleteModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="executeBulkDelete()">Delete Keys</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
