@@ -947,11 +947,13 @@ svg {
     top: 0;
     align-self: start;
     height: 100vh;
+    max-height: 100vh;
     display: flex;
     flex-direction: column;
     background-color: var(--bg-raised);
     border-right: 1px solid var(--border);
     overflow-y: auto;
+    z-index: 50;
 }
 
 .sidebar-header {
