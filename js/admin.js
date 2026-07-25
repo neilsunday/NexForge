@@ -536,7 +536,7 @@ function generateKeyString() {
 // Resolve the users.id that corresponds to the signed-in admin.
 // Ensures we have a valid users row before inserting a key (keys.created_by has a FK to users.id).
 async function resolveAdminUserId() {
-  // 1. Match by auth id â€” common case for web-first admins
+  // 1. Match by auth id " common case for web-first admins
   const { data: byId } = await NexaKS.supabase
     .from("users").select("id").eq("id", currentUser.id).maybeSingle();
   if (byId) return byId.id;
@@ -572,6 +572,13 @@ async function generateKeys() {
 
   if (qty < 1 || qty > 500) return showToast("Quantity must be 1-500", "error");
 
+  // Warn admin when generating admin-plan keys (grant full site access)
+  if (plan === "admin") {
+    if (!confirm("Generate " + qty + " ADMIN key(s)?\n\nThese keys grant full admin access to the website when redeemed. Only issue them to trusted staff.")) {
+      return;
+    }
+  }
+
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Generating...";
@@ -585,7 +592,7 @@ async function generateKeys() {
     // Make sure the admin has a users row (needed for keys.created_by FK)
     const adminId = await resolveAdminUserId();
 
-    // Generate unique key strings â€” retry on in-batch collisions
+    // Generate unique key strings " retry on in-batch collisions
     const keySet = new Set();
     let attempts = 0;
     while (keySet.size < qty && attempts < qty * 10) {
