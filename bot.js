@@ -4,7 +4,9 @@
    ======================================== */
 
 const {
-    Client, MessageFlags, GatewayIntentBits, SlashCommandBuilder, REST, Routes, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle
+    Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes,
+    EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder,
+    ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -17,14 +19,6 @@ const ADMIN_ROLE_ID = process.env.DISCORD_ADMIN_ROLE_ID;
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SITE_URL = process.env.SITE_URL || 'https://keyora-gyuu.onrender.com';
-
-// Project slug -> Discord role ID mapping
-// Env vars override the defaults if set.
-const PROJECT_ROLE_MAP = {
-    macro:   process.env.DISCORD_ROLE_MACRO   || '1530196461730533556',
-    premium: process.env.DISCORD_ROLE_PREMIUM || '1530196527740358697',
-    private: process.env.DISCORD_ROLE_PRIVATE || '1530196626503897138'
-};
 
 if (!BOT_TOKEN || !CLIENT_ID) {
     console.error('Missing DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID');
@@ -85,18 +79,7 @@ const commands = [
     new SlashCommandBuilder()
         .setName('lookup')
         .setDescription('[Admin] Look up a user')
-        .addUserOption(opt => opt.setName('user').setDescription('Discord user').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('setrole')
-        .setDescription('[Admin] Manually assign a project role to a user')
         .addUserOption(opt => opt.setName('user').setDescription('Discord user').setRequired(true))
-        .addStringOption(opt => opt.setName('project').setDescription('Which role').setRequired(true)
-            .addChoices(
-                { name: 'Macro', value: 'macro' },
-                { name: 'Private', value: 'private' },
-                { name: 'Premium', value: 'premium' }
-            ))
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -161,28 +144,6 @@ async function assignVerifiedRole(interaction) {
     }
 }
 
-// Assign a project-specific role (macro / private / premium) to a member.
-// Accepts either the interaction's member or a fetched GuildMember object.
-async function assignProjectRole(memberOrInteraction, projectSlug) {
-    if (!projectSlug) return { ok: false, reason: 'no_project' };
-    const slug = String(projectSlug).toLowerCase();
-    const roleId = PROJECT_ROLE_MAP[slug];
-    if (!roleId) return { ok: false, reason: 'no_role_configured', slug };
-
-    const member = memberOrInteraction?.member || memberOrInteraction;
-    if (!member || !member.roles || typeof member.roles.add !== 'function') {
-        return { ok: false, reason: 'no_member' };
-    }
-
-    try {
-        await member.roles.add(roleId);
-        return { ok: true, slug, roleId };
-    } catch (err) {
-        console.warn('Project role assign failed (' + slug + '):', err.message);
-        return { ok: false, reason: 'discord_error', error: err.message };
-    }
-}
-
 function generateKeyString() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const segs = [];
@@ -234,42 +195,42 @@ client.on('interactionCreate', async (interaction) => {
             // /setup-panel (admin only)
             if (cmd === 'setup-panel') {
                 if (!(await isAdmin(interaction))) {
-                    return interaction.reply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)], flags: MessageFlags.Ephemeral });
+                    return interaction.reply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)], ephemeral: true });
                 }
                 const slug = interaction.options.getString('project');
                 let panelProject = null;
                 if (slug) {
                     const { data } = await sb.from('projects').select('*').eq('slug', slug.trim().toLowerCase()).maybeSingle();
-                    if (!data) return interaction.reply({ embeds: [embed('Not Found', 'No project with slug \`' + slug + '\`', 0xef4444)], flags: MessageFlags.Ephemeral });
+                    if (!data) return interaction.reply({ embeds: [embed('Not Found', 'No project with slug \`' + slug + '\`', 0xef4444)], ephemeral: true });
                     panelProject = data;
                 }
-                await interaction.reply({ content: 'Panel posted.', flags: MessageFlags.Ephemeral });
+                await interaction.reply({ content: 'Panel posted.', ephemeral: true });
                 await interaction.channel.send(buildPanel(panelProject));
                 return;
             }
 
             // /redeem (traditional slash)
             if (cmd === 'redeem') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 const key = interaction.options.getString('key').trim().toUpperCase();
                 return handleRedeem(interaction, key);
             }
 
             // /resethwid
             if (cmd === 'resethwid') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 return handleResetHwid(interaction);
             }
 
             // /keyinfo
             if (cmd === 'keyinfo') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 return handleKeyInfo(interaction);
             }
 
             // /generate (admin)
             if (cmd === 'generate') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
@@ -282,7 +243,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // /revoke (admin)
             if (cmd === 'revoke') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
@@ -292,23 +253,12 @@ client.on('interactionCreate', async (interaction) => {
 
             // /lookup (admin)
             if (cmd === 'lookup') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 if (!(await isAdmin(interaction))) {
                     return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
                 }
                 const targetUser = interaction.options.getUser('user');
                 return handleLookup(interaction, targetUser);
-            }
-
-            // /setrole (admin) - manually assign a project role
-            if (cmd === 'setrole') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-                if (!(await isAdmin(interaction))) {
-                    return interaction.editReply({ embeds: [embed('Access Denied', 'Admin only.', 0xef4444)] });
-                }
-                const targetUser = interaction.options.getUser('user');
-                const projectSlug = interaction.options.getString('project');
-                return handleSetRole(interaction, targetUser, projectSlug);
             }
         }
 
@@ -335,14 +285,14 @@ client.on('interactionCreate', async (interaction) => {
 
             // Get Script button (may carry :slug for a project)
             if (id === 'panel_script' || id.startsWith('panel_script:')) {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 const slug = id.includes(':') ? id.split(':')[1] : null;
                 return handleGetScript(interaction, slug);
             }
 
             // Get Role button
             if (id === 'panel_role') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 return handleGetRole(interaction);
             }
 
@@ -358,7 +308,7 @@ client.on('interactionCreate', async (interaction) => {
                         '**Cooldown:** 24 hours between resets.\n' +
                         '**Limit:** 5 resets total per key.', 0xf59e0b)],
                     components: [confirmRow],
-                    flags: MessageFlags.Ephemeral
+                    ephemeral: true
                 });
             }
 
@@ -378,7 +328,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // Get Stats button
             if (id === 'panel_stats') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 return handleKeyInfo(interaction);
             }
         }
@@ -386,7 +336,7 @@ client.on('interactionCreate', async (interaction) => {
         // ============ MODAL SUBMISSIONS ============
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'modal_redeem') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                await interaction.deferReply({ ephemeral: true });
                 const key = interaction.fields.getTextInputValue('key_input').trim().toUpperCase();
                 return handleRedeem(interaction, key);
             }
@@ -395,7 +345,7 @@ client.on('interactionCreate', async (interaction) => {
     } catch (err) {
         console.error('Interaction error:', err);
         try {
-            const msg = { embeds: [embed('Error', 'Something went wrong: ' + err.message, 0xef4444)], flags: MessageFlags.Ephemeral };
+            const msg = { embeds: [embed('Error', 'Something went wrong: ' + err.message, 0xef4444)], ephemeral: true };
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(msg).catch(() => {});
             } else {
@@ -441,20 +391,6 @@ async function handleRedeem(interaction, key) {
     // Auto-assign Verified role
     const roleAssigned = await assignVerifiedRole(interaction);
 
-    // Auto-assign project role (macro / private / premium) based on the key's project
-    let projectRoleLine = '';
-    if (existing.project_id) {
-        const { data: proj } = await sb.from('projects').select('slug, name').eq('id', existing.project_id).maybeSingle();
-        if (proj && proj.slug) {
-            const result = await assignProjectRole(interaction, proj.slug);
-            if (result.ok) {
-                projectRoleLine = '**' + proj.slug.charAt(0).toUpperCase() + proj.slug.slice(1) + '** role assigned.\n';
-            } else if (result.reason === 'no_role_configured') {
-                projectRoleLine = 'No role configured for project `' + proj.slug + '`.\n';
-            }
-        }
-    }
-
     const expText = updates.expires_at
         ? new Date(updates.expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : 'Lifetime';
@@ -465,7 +401,6 @@ async function handleRedeem(interaction, key) {
             '**Expires:** ' + expText + '\n' +
             '**Key:** `' + key + '`\n\n' +
             (roleAssigned ? 'Verified role assigned.\n' : '') +
-            projectRoleLine +
             'Click **Get Script** to receive your loader.', 0x10b981)]
     });
 }
@@ -749,45 +684,6 @@ async function handleLookup(interaction, targetUser) {
         '**Banned:** ' + (user.is_banned ? 'Yes' : 'No') + '\n' +
         '**Total keys:** ' + (keys?.length || 0) + ' (' + active.length + ' active, ' + revoked.length + ' revoked)\n\n' +
         '**Active Keys:**\n' + keySummary, 0x7c3aed)] });
-}
-
-async function handleSetRole(interaction, targetUser, projectSlug) {
-    if (!PROJECT_ROLE_MAP[projectSlug]) {
-        return interaction.editReply({ embeds: [embed('Not Configured',
-            'No role ID configured for `' + projectSlug + '`. Set `DISCORD_ROLE_' + projectSlug.toUpperCase() + '` in env.', 0xef4444)] });
-    }
-
-    // Fetch the guild member for the target user
-    let targetMember;
-    try {
-        targetMember = await interaction.guild.members.fetch(targetUser.id);
-    } catch (err) {
-        return interaction.editReply({ embeds: [embed('Not Found',
-            targetUser.username + ' is not a member of this server.', 0xef4444)] });
-    }
-
-    const result = await assignProjectRole(targetMember, projectSlug);
-    if (!result.ok) {
-        const msg = result.reason === 'discord_error'
-            ? 'Discord rejected the role assignment: ' + result.error + '\n\nMake sure the bot role is above the target role in Server Settings > Roles.'
-            : 'Failed: ' + result.reason;
-        return interaction.editReply({ embeds: [embed('Assignment Failed', msg, 0xef4444)] });
-    }
-
-    // Log it
-    const admin = await ensureUserRow(interaction.user);
-    await sb.from('logs').insert({
-        user_id: admin?.id,
-        action: 'admin_setrole', status: 'success',
-        metadata: {
-            message: 'Assigned ' + projectSlug + ' role to ' + targetUser.username + ' by ' + interaction.user.username,
-            target_discord_id: targetUser.id,
-            project: projectSlug
-        }
-    });
-
-    return interaction.editReply({ embeds: [embed('Role Assigned',
-        '<@' + targetUser.id + '> now has the **' + projectSlug.charAt(0).toUpperCase() + projectSlug.slice(1) + '** role.', 0x10b981)] });
 }
 
 // ========== Startup ==========
