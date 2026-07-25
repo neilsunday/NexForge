@@ -1,55 +1,39 @@
 /* ========================================
-   NexaKS — Projects Page JS
-   Handles list/search/pagination, create/edit/delete,
-   and per-project detail tabs (Keys, Whitelist, Blacklist, Logs, Settings).
+   NexaKS — Projects Page (Luarmor-style, Phase 2)
    ======================================== */
 
 let currentUser = null;
-let currentProject = null;         // project currently open in detail panel
+let projectsCache = [];
+let currentProject = null;   // project open in settings modal
 let currentTab = 'overview';
-let state = {
-    page: 1,
-    perPage: 12,
-    search: '',
-    archived: false,
-    total: 0
-};
 let searchDebounce = null;
+let searchTerm = '';
 
 // ---------- Boot ----------
 document.addEventListener('DOMContentLoaded', async () => {
     const loader = document.getElementById('authLoader');
     const main = document.getElementById('projectsMain');
-    const forceShow = setTimeout(() => {
-        if (loader) loader.style.display = 'none';
-        if (main) main.style.display = 'grid';
-    }, 6000);
+    const forceShow = setTimeout(() => { if (loader) loader.style.display='none'; if (main) main.style.display='grid'; }, 6000);
 
     try {
         currentUser = await NexaKS.getCurrentUser();
         if (!currentUser) {
             clearTimeout(forceShow);
             if (loader) loader.innerHTML =
-                '<div style="text-align:center;color:white;padding:40px;">' +
-                '<h2>Not signed in</h2>' +
+                '<div style="text-align:center;color:white;padding:40px;"><h2>Not signed in</h2>' +
                 '<p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">go back</a> and sign in with Discord.</p></div>';
             return;
         }
-
         document.getElementById('signOutBtn')?.addEventListener('click', async (e) => {
-            e.preventDefault();
-            await NexaKS.signOut();
-            window.location.href = '/';
+            e.preventDefault(); await NexaKS.signOut(); window.location.href='/';
         });
-
         await loadProjects();
     } catch (err) {
-        console.error('Projects init:', err);
-        showToast('Failed to load projects', 'error');
+        console.error('init', err); showToast('Failed to load', 'error');
     } finally {
         clearTimeout(forceShow);
-        if (loader) loader.style.display = 'none';
-        if (main) main.style.display = 'grid';
+        if (loader) loader.style.display='none';
+        if (main) main.style.display='grid';
     }
 });
 
@@ -58,611 +42,452 @@ async function api(path, opts = {}) {
     const session = await NexaKS.supabase.auth.getSession();
     const token = session?.data?.session?.access_token;
     if (!token) throw new Error('No auth token');
-
     const res = await fetch(path, {
         ...opts,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token,
-            ...(opts.headers || {})
-        }
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token, ...(opts.headers||{}) }
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || res.statusText);
     return body;
 }
 
-// ---------- Projects list ----------
+// ---------- Load + render projects ----------
 async function loadProjects() {
-    state.archived = document.getElementById('showArchived')?.checked || false;
-    const grid = document.getElementById('projectsGrid');
+    const list = document.getElementById('projectsList');
     const empty = document.getElementById('emptyState');
-    const pag = document.getElementById('pagination');
-
-    grid.innerHTML = '<div style="color:#a0a0b8;padding:20px;">Loading…</div>';
-    pag.innerHTML = '';
+    list.innerHTML = '<div style="color:#a0a0b8;padding:20px;">Loading…</div>';
     empty.style.display = 'none';
 
     try {
-        const qs = new URLSearchParams({
-            page: state.page, per_page: state.perPage,
-            search: state.search, archived: state.archived
-        });
+        const qs = new URLSearchParams({ per_page: 50, search: searchTerm });
         const data = await api('/api/projects?' + qs.toString());
-        state.total = data.pagination.total;
+        projectsCache = data.projects || [];
 
-        if (!data.projects.length) {
-            grid.innerHTML = '';
+        if (!projectsCache.length) {
+            list.innerHTML = '';
             empty.style.display = 'block';
+            renderStats(0, 0);
             return;
         }
 
-        grid.innerHTML = data.projects.map(renderProjectCard).join('');
-        renderPagination(data.pagination);
+        // fetch scripts for each project in parallel
+        const withScripts = await Promise.all(projectsCache.map(async (p) => {
+            try {
+                const s = await api('/api/projects/' + p.id + '/scripts');
+                return { ...p, scripts: s.scripts || [] };
+            } catch { return { ...p, scripts: [] }; }
+        }));
+        projectsCache = withScripts;
+
+        const totalScripts = withScripts.reduce((n, p) => n + p.scripts.length, 0);
+        renderStats(withScripts.length, totalScripts);
+        list.innerHTML = withScripts.map(renderProjectCard).join('');
     } catch (err) {
-        grid.innerHTML = '<div style="color:#f87171;padding:20px;">Error: ' + escapeHtml(err.message) + '</div>';
+        list.innerHTML = '<div style="color:#f87171;padding:20px;">Error: ' + escapeHtml(err.message) + '</div>';
     }
+}
+
+function renderStats(projectCount, scriptCount) {
+    document.getElementById('statsRow').innerHTML = `
+        <div class="stat-card">
+            <div class="stat-icon green">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M9 12h6M9 16h6M9 8h2M6 2h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="stat-body">
+                <div class="label">Total Scripts</div>
+                <div class="value">${scriptCount}</div>
+                <div class="stat-bar"><span style="width:100%"></span></div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon purple">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="10" rx="2" stroke="#fff" stroke-width="1.6"/><path d="M8 11V8a4 4 0 018 0v3" stroke="#fff" stroke-width="1.6"/></svg>
+            </div>
+            <div class="stat-body">
+                <div class="label">Total Projects</div>
+                <div class="value">${projectCount}</div>
+                <div class="stat-bar"><span style="width:100%"></span></div>
+            </div>
+        </div>`;
 }
 
 function renderProjectCard(p) {
-    const statusBadge = p.archived
-        ? '<span class="badge-status badge-archived">Archived</span>'
-        : (p.status === 'active'
-            ? '<span class="badge-status badge-active">Active</span>'
-            : '<span class="badge-status badge-disabled">Disabled</span>');
-    const created = new Date(p.created_at).toLocaleDateString();
+    const scriptsHtml = p.scripts.length
+        ? `<table class="scripts-table">
+            <thead><tr>
+                <th style="width:40px;"></th><th>Script Name</th><th>Status</th>
+                <th>Version</th><th>Last Edit</th><th style="text-align:right;">Actions</th>
+            </tr></thead>
+            <tbody>
+            ${p.scripts.map(s => renderScriptRow(p, s)).join('')}
+            </tbody></table>`
+        : `<div class="project-empty">No scripts yet — click <strong>Add Script</strong> to create one.</div>`;
+
     return `
-        <div class="project-card" onclick="openDetail('${p.id}')">
-            <div class="project-card-head">
-                <div class="project-card-title">${escapeHtml(p.name)}</div>
-                ${statusBadge}
+    <div class="project-card">
+        <div class="project-head">
+            <div class="project-logo">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 6l8-4 8 4v12l-8 4-8-4V6z" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
             </div>
-            <div class="project-card-desc">${escapeHtml(p.description || 'No description')}</div>
-            <div class="project-card-meta">
-                <span>v${escapeHtml(p.version || '1.0.0')}</span>
-                <span>•</span>
-                <span>${created}</span>
+            <div class="project-meta">
+                <div class="project-name">${escapeHtml(p.name)}</div>
+                <div class="project-id">${escapeHtml(p.id)}</div>
+            </div>
+            <div class="project-actions">
+                <button class="btn-mini btn-edit" onclick="openScriptModal('${p.id}')">＋ Add Script</button>
+                <button class="btn-sm" title="Settings" onclick="openSettings('${p.id}')">⚙</button>
             </div>
         </div>
-    `;
+        ${scriptsHtml}
+    </div>`;
 }
 
-function renderPagination({ page, total_pages }) {
-    const pag = document.getElementById('pagination');
-    if (total_pages <= 1) { pag.innerHTML = ''; return; }
-    let html = '';
-    html += `<button ${page === 1 ? 'disabled' : ''} onclick="gotoPage(${page - 1})">←</button>`;
-    for (let i = 1; i <= total_pages; i++) {
-        if (i === 1 || i === total_pages || Math.abs(i - page) <= 2) {
-            html += `<button class="${i === page ? 'active' : ''}" onclick="gotoPage(${i})">${i}</button>`;
-        } else if (Math.abs(i - page) === 3) {
-            html += `<span style="padding:0 6px;color:#6b7280;">…</span>`;
-        }
-    }
-    html += `<button ${page === total_pages ? 'disabled' : ''} onclick="gotoPage(${page + 1})">→</button>`;
-    pag.innerHTML = html;
+function renderScriptRow(p, s) {
+    const statusClass = s.status === 'active' ? 'status-active' : s.status === 'disabled' ? 'status-disabled' : 'status-free';
+    const statusLabel = (s.status || 'free').toUpperCase();
+    const lastEdit = s.last_edit ? new Date(s.last_edit).toLocaleString() : '—';
+    const lock = s.obfuscated ? ' 🔒' : '';
+    return `
+    <tr>
+        <td>
+            <label class="switch">
+                <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleScript('${p.id}','${s.id}',this.checked)">
+                <span class="slider"></span>
+            </label>
+        </td>
+        <td>
+            <div class="script-name-cell">
+                <div class="lua-badge">LUA</div>
+                <div>
+                    <div class="script-name">${escapeHtml(s.name)}${lock}</div>
+                    <div class="script-id">${escapeHtml(s.id)}</div>
+                </div>
+            </div>
+        </td>
+        <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+        <td style="color:#d1d5db;">v${escapeHtml(s.version || '0.0.0.0')}</td>
+        <td style="color:#a0a0b8; font-size:12px;">${lastEdit}</td>
+        <td>
+            <div class="table-actions">
+                <button class="btn-mini btn-loader" onclick="showLoader('${p.id}','${s.id}')">⬇ Loader</button>
+                <button class="btn-mini btn-edit" onclick="openScriptModal('${p.id}','${s.id}')">✎ Edit</button>
+                <button class="btn-mini btn-del" onclick="deleteScript('${p.id}','${s.id}')">🗑 Delete</button>
+            </div>
+        </td>
+    </tr>`;
 }
 
-function gotoPage(p) { state.page = p; loadProjects(); }
-
+// ---------- Search ----------
 function onSearchInput() {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
-        state.search = document.getElementById('searchInput').value.trim();
-        state.page = 1;
+        searchTerm = document.getElementById('searchInput').value.trim();
         loadProjects();
     }, 300);
 }
 
-// ---------- Create / Edit modal ----------
-function openCreateModal() {
-    document.getElementById('modalTitle').textContent = 'New Project';
-    document.getElementById('submitBtn').textContent = 'Create';
-    document.getElementById('editId').value = '';
-    document.getElementById('fName').value = '';
-    document.getElementById('fDesc').value = '';
-    document.getElementById('fVersion').value = '1.0.0';
-    document.getElementById('fScript').value = '';
-    document.getElementById('fStatus').value = 'active';
+// ---------- Project create/edit ----------
+function openProjectModal(id) {
+    const p = id ? projectsCache.find(x => x.id === id) : null;
+    document.getElementById('pmTitle').textContent = p ? 'Edit Project' : 'Create Project';
+    document.getElementById('pmSubmit').textContent = p ? 'Save' : 'Create';
+    document.getElementById('pmId').value = p ? p.id : '';
+    document.getElementById('pmName').value = p ? p.name : '';
+    document.getElementById('pmDesc').value = p ? (p.description || '') : '';
+    document.getElementById('pmVersion').value = p ? (p.version || '1.0.0') : '1.0.0';
+    document.getElementById('pmStatus').value = p ? (p.status || 'active') : 'active';
     document.getElementById('projectModal').classList.add('show');
-}
-
-function openEditModal(p) {
-    document.getElementById('modalTitle').textContent = 'Edit Project';
-    document.getElementById('submitBtn').textContent = 'Save';
-    document.getElementById('editId').value = p.id;
-    document.getElementById('fName').value = p.name;
-    document.getElementById('fDesc').value = p.description || '';
-    document.getElementById('fVersion').value = p.version || '1.0.0';
-    document.getElementById('fScript').value = p.script_content || '';
-    document.getElementById('fStatus').value = p.status || 'active';
-    document.getElementById('projectModal').classList.add('show');
-}
-
-function closeModal() {
-    document.getElementById('projectModal').classList.remove('show');
 }
 
 async function submitProject(e) {
     e.preventDefault();
-    const id = document.getElementById('editId').value;
+    const id = document.getElementById('pmId').value;
     const payload = {
-        name: document.getElementById('fName').value.trim(),
-        description: document.getElementById('fDesc').value.trim(),
-        version: document.getElementById('fVersion').value.trim(),
-        script_content: document.getElementById('fScript').value,
-        status: document.getElementById('fStatus').value
+        name: document.getElementById('pmName').value.trim(),
+        description: document.getElementById('pmDesc').value.trim(),
+        version: document.getElementById('pmVersion').value.trim(),
+        status: document.getElementById('pmStatus').value
     };
     try {
-        if (id) {
-            const { project } = await api('/api/projects/' + id, {
-                method: 'PATCH', body: JSON.stringify(payload)
-            });
-            showToast('Project updated', 'success');
-            if (currentProject && currentProject.id === id) {
-                currentProject = project;
-                renderDetailHeader();
-                switchTab(currentTab);
-            }
-        } else {
-            await api('/api/projects', {
-                method: 'POST', body: JSON.stringify(payload)
-            });
-            showToast('Project created', 'success');
-        }
-        closeModal();
+        if (id) { await api('/api/projects/' + id, { method:'PATCH', body:JSON.stringify(payload) }); showToast('Project updated','success'); }
+        else { await api('/api/projects', { method:'POST', body:JSON.stringify(payload) }); showToast('Project created','success'); }
+        closeModal('projectModal');
         loadProjects();
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
-}
-
-// ---------- Detail panel ----------
-async function openDetail(id) {
-    try {
-        const { project } = await api('/api/projects/' + id);
-        currentProject = project;
-        document.getElementById('detailPanel').classList.add('show');
-        renderDetailHeader();
-        switchTab('overview');
-    } catch (err) {
-        showToast('Failed to load project', 'error');
-    }
-}
-
-function closeDetail() {
-    document.getElementById('detailPanel').classList.remove('show');
-    currentProject = null;
-    loadProjects();
-}
-
-function renderDetailHeader() {
-    if (!currentProject) return;
-    document.getElementById('dName').textContent = currentProject.name;
-    const statusText = currentProject.archived ? 'Archived'
-        : (currentProject.status === 'active' ? 'Active' : 'Disabled');
-    document.getElementById('dMeta').textContent =
-        `v${currentProject.version || '1.0.0'} • ${statusText} • ID: ${currentProject.id.slice(0, 8)}…`;
-}
-
-function editCurrentProject() { openEditModal(currentProject); }
-
-async function toggleArchive() {
-    if (!currentProject) return;
-    const archived = !currentProject.archived;
-    if (archived && !confirm('Archive this project?')) return;
-    try {
-        const { project } = await api('/api/projects/' + currentProject.id + '/archive', {
-            method: 'POST', body: JSON.stringify({ archived })
-        });
-        currentProject = project;
-        renderDetailHeader();
-        showToast(archived ? 'Project archived' : 'Project restored', 'success');
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
+    } catch (err) { showToast('Error: '+err.message,'error'); }
 }
 
 async function deleteCurrentProject() {
     if (!currentProject) return;
-    if (!confirm(`Delete "${currentProject.name}"? This deletes all its keys, whitelist, blacklist, and logs. Cannot be undone.`)) return;
+    if (!confirm(`Delete "${currentProject.name}"? This removes all its scripts, keys, whitelist, blacklist and logs. Cannot be undone.`)) return;
     try {
-        await api('/api/projects/' + currentProject.id, { method: 'DELETE' });
-        showToast('Project deleted', 'success');
-        closeDetail();
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
+        await api('/api/projects/' + currentProject.id, { method:'DELETE' });
+        showToast('Project deleted','success');
+        closeModal('settingsModal');
+        loadProjects();
+    } catch (err) { showToast('Error: '+err.message,'error'); }
 }
 
-// ---------- Tabs ----------
-function switchTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.detail-tabs button').forEach(b => {
-        b.classList.toggle('active', b.dataset.tab === tab);
-    });
-    const c = document.getElementById('detailContent');
-    c.innerHTML = '<div style="color:#a0a0b8;padding:20px;">Loading…</div>';
-
-    if (tab === 'overview') renderOverviewTab(c);
-    else if (tab === 'keys') renderKeysTab(c);
-    else if (tab === 'whitelist') renderWhitelistTab(c);
-    else if (tab === 'blacklist') renderBlacklistTab(c);
-    else if (tab === 'logs') renderLogsTab(c);
-    else if (tab === 'settings') renderSettingsTab(c);
+// ---------- Script create/edit ----------
+function openScriptModal(projectId, scriptId) {
+    const p = projectsCache.find(x => x.id === projectId);
+    const s = scriptId ? p?.scripts.find(x => x.id === scriptId) : null;
+    document.getElementById('smTitle').textContent = s ? 'Edit Script' : 'Add Script';
+    document.getElementById('smSub').textContent = 'Project: ' + (p ? p.name : '');
+    document.getElementById('smSubmit').textContent = s ? 'Save' : 'Add Script';
+    document.getElementById('smProjectId').value = projectId;
+    document.getElementById('smId').value = s ? s.id : '';
+    document.getElementById('smName').value = s ? s.name : '';
+    document.getElementById('smVersion').value = s ? (s.version || '0.0.0.0') : '0.0.0.0';
+    document.getElementById('smStatus').value = s ? (s.status || 'free') : 'free';
+    document.getElementById('smObf').value = s && s.obfuscated ? 'true' : 'false';
+    document.getElementById('smContent').value = s ? (s.script_content || '') : '';
+    document.getElementById('scriptModal').classList.add('show');
 }
 
-// ---------- OVERVIEW ----------
-async function renderOverviewTab(c) {
+async function submitScript(e) {
+    e.preventDefault();
+    const projectId = document.getElementById('smProjectId').value;
+    const id = document.getElementById('smId').value;
+    const payload = {
+        name: document.getElementById('smName').value.trim(),
+        version: document.getElementById('smVersion').value.trim(),
+        status: document.getElementById('smStatus').value,
+        obfuscated: document.getElementById('smObf').value === 'true',
+        script_content: document.getElementById('smContent').value
+    };
     try {
-        const { analytics } = await api('/api/projects/' + currentProject.id + '/analytics');
-        const a = analytics || {};
-        const loaderUrl = `${window.location.origin}/api/verify?license=USER_KEY&hwid=HWID&project=${encodeURIComponent(currentProject.api_key)}`;
-        const luaLoader =
-`-- NexaKS Loader for ${currentProject.name}
+        if (id) { await api(`/api/projects/${projectId}/scripts/${id}`, { method:'PATCH', body:JSON.stringify(payload) }); showToast('Script updated','success'); }
+        else { await api(`/api/projects/${projectId}/scripts`, { method:'POST', body:JSON.stringify(payload) }); showToast('Script added','success'); }
+        closeModal('scriptModal');
+        loadProjects();
+    } catch (err) { showToast('Error: '+err.message,'error'); }
+}
+
+async function toggleScript(projectId, scriptId, enabled) {
+    try {
+        await api(`/api/projects/${projectId}/scripts/${scriptId}/toggle`, { method:'POST', body:JSON.stringify({ enabled }) });
+        const p = projectsCache.find(x => x.id === projectId);
+        const s = p?.scripts.find(x => x.id === scriptId);
+        if (s) s.enabled = enabled;
+        showToast(enabled ? 'Script enabled' : 'Script disabled','success');
+    } catch (err) { showToast('Error: '+err.message,'error'); loadProjects(); }
+}
+
+async function deleteScript(projectId, scriptId) {
+    if (!confirm('Delete this script? Cannot be undone.')) return;
+    try {
+        await api(`/api/projects/${projectId}/scripts/${scriptId}`, { method:'DELETE' });
+        showToast('Script deleted','success');
+        loadProjects();
+    } catch (err) { showToast('Error: '+err.message,'error'); }
+}
+
+// ---------- Loader snippet ----------
+function showLoader(projectId, scriptId) {
+    const p = projectsCache.find(x => x.id === projectId);
+    const s = p?.scripts.find(x => x.id === scriptId);
+    if (!p || !s) return;
+    const origin = window.location.origin;
+    const loader =
+`-- NexaKS Loader — ${p.name} / ${s.name}
 local license = "PASTE_KEY_HERE"
 local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-local url = "${window.location.origin}/api/verify?license=" .. license .. "&hwid=" .. hwid .. "&project=${currentProject.api_key}"
+local url = "${origin}/api/verify?license=" .. license .. "&hwid=" .. hwid .. "&project=${p.api_key}&script=${s.id}"
 local ok, response = pcall(function() return game:HttpGet(url, true) end)
 if not ok then return error("NexaKS: Network error") end
 loadstring(response)()`;
-
-        c.innerHTML = `
-            <div class="stat-grid">
-                ${statBox('Total Keys', a.total_keys ?? 0)}
-                ${statBox('Active Keys', a.active_keys ?? 0)}
-                ${statBox('Total Executions', a.total_executions ?? 0)}
-                ${statBox('Executions (24h)', a.executions_24h ?? 0)}
-                ${statBox('Unique HWIDs (7d)', a.unique_hwids_7d ?? 0)}
-                ${statBox('Whitelist', a.whitelist_count ?? 0)}
-                ${statBox('Blacklist', a.blacklist_count ?? 0)}
-                ${statBox('Logs (24h)', a.logs_24h ?? 0)}
-            </div>
-            <h3 style="color:#fff; margin:24px 0 12px;">Project API Key</h3>
-            <div class="code-block">${escapeHtml(currentProject.api_key)}</div>
-            <button class="btn-sm" style="margin-top:8px;" onclick="regenerateApiKey()">Regenerate API Key</button>
-
-            <h3 style="color:#fff; margin:24px 0 12px;">Lua Loader Snippet</h3>
-            <div class="code-block">${escapeHtml(luaLoader)}</div>
-            <button class="btn-sm" style="margin-top:8px;" onclick="copyText(\`${luaLoader.replace(/`/g, '\\`')}\`)">Copy loader</button>
-        `;
-    } catch (err) {
-        c.innerHTML = `<div style="color:#f87171;">Failed to load analytics: ${escapeHtml(err.message)}</div>`;
-    }
+    // reuse settings modal shell for a quick loader view
+    currentProject = p;
+    document.getElementById('setTitle').textContent = 'Loader — ' + s.name;
+    document.getElementById('setTabs').style.display = 'none';
+    document.getElementById('setContent').innerHTML = `
+        <p class="sub">Paste this into your executor. Replace <strong>PASTE_KEY_HERE</strong> with the user's key.</p>
+        <div class="code-block">${escapeHtml(loader)}</div>
+        <button class="btn-sm" style="margin-top:10px;" onclick='copyText(${JSON.stringify(loader)})'>Copy loader</button>`;
+    document.getElementById('settingsModal').classList.add('show');
 }
 
-async function regenerateApiKey() {
-    if (!confirm('Regenerate API key? Existing loaders will stop working until updated.')) return;
+// ---------- Project settings modal (tabs) ----------
+async function openSettings(projectId) {
     try {
-        const { project } = await api('/api/projects/' + currentProject.id + '/regenerate-key',
-            { method: 'POST' });
+        const { project } = await api('/api/projects/' + projectId);
         currentProject = project;
-        showToast('API key regenerated', 'success');
+        document.getElementById('setTitle').textContent = 'Project — ' + project.name;
+        document.getElementById('setTabs').style.display = 'flex';
+        document.getElementById('settingsModal').classList.add('show');
         switchTab('overview');
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
+    } catch (err) { showToast('Failed to open settings','error'); }
 }
 
-// ---------- KEYS ----------
-async function renderKeysTab(c) {
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('#setTabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    const c = document.getElementById('setContent');
+    c.innerHTML = '<div style="color:#a0a0b8;padding:20px;">Loading…</div>';
+    if (tab==='overview') overviewTab(c);
+    else if (tab==='keys') keysTab(c);
+    else if (tab==='whitelist') whitelistTab(c);
+    else if (tab==='blacklist') blacklistTab(c);
+    else if (tab==='logs') logsTab(c);
+    else if (tab==='config') configTab(c);
+}
+
+async function overviewTab(c) {
+    try {
+        const { analytics:a } = await api('/api/projects/' + currentProject.id + '/analytics');
+        c.innerHTML = `
+            <div class="mini-stat-grid">
+                ${mini('Scripts', a.total_scripts ?? 0)}
+                ${mini('Active Scripts', a.active_scripts ?? 0)}
+                ${mini('Total Keys', a.total_keys ?? 0)}
+                ${mini('Active Keys', a.active_keys ?? 0)}
+                ${mini('Executions', a.total_executions ?? 0)}
+                ${mini('Exec (24h)', a.executions_24h ?? 0)}
+                ${mini('Whitelist', a.whitelist_count ?? 0)}
+                ${mini('Blacklist', a.blacklist_count ?? 0)}
+            </div>
+            <h3 style="color:#fff; margin:8px 0 8px; font-size:15px;">Project API Key</h3>
+            <div class="code-block">${escapeHtml(currentProject.api_key)}</div>
+            <button class="btn-sm" style="margin-top:8px;" onclick="regenApiKey()">Regenerate API Key</button>`;
+    } catch (err) { c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`; }
+}
+
+async function regenApiKey() {
+    if (!confirm('Regenerate API key? Existing loaders stop working until updated.')) return;
+    try {
+        const { project } = await api('/api/projects/' + currentProject.id + '/regenerate-key', { method:'POST' });
+        currentProject = project; showToast('API key regenerated','success'); switchTab('overview'); loadProjects();
+    } catch (err) { showToast('Error: '+err.message,'error'); }
+}
+
+async function keysTab(c) {
     try {
         const { keys } = await api('/api/projects/' + currentProject.id + '/keys?per_page=100');
         c.innerHTML = `
-            <div style="display:flex; gap:10px; margin-bottom:16px; align-items:center;">
-                <button class="btn btn-primary" onclick="promptGenerateKey()">+ Generate Key</button>
+            <div class="row-inline">
+                <button class="btn btn-primary btn-sm" onclick="genKey()">＋ Generate Key</button>
                 <span style="color:#a0a0b8; font-size:13px;">${keys.length} key(s)</span>
             </div>
-            ${keys.length === 0 ? '<div class="empty-state"><h3>No keys yet</h3><p>Generate your first key.</p></div>' : `
-            <table class="data-table">
-                <thead><tr>
-                    <th>Key</th><th>Status</th><th>HWID</th><th>Executions</th><th>Expires</th><th></th>
-                </tr></thead>
-                <tbody>
-                ${keys.map(k => `
-                    <tr>
-                        <td class="mono">${escapeHtml(k.key)}</td>
-                        <td>${statusPill(k.status)}</td>
-                        <td class="mono" title="${escapeHtml(k.hwid || '')}">${k.hwid ? escapeHtml(k.hwid.slice(0, 12) + '…') : '<span style="color:#6b7280;">unbound</span>'}</td>
-                        <td>${k.execution_count || 0}</td>
-                        <td>${k.expires_at ? new Date(k.expires_at).toLocaleDateString() : '<span style="color:#6b7280;">Never</span>'}</td>
-                        <td class="row-actions">
-                            <button class="btn-sm" onclick="resetKeyHwid('${k.id}')">Reset HWID</button>
-                            <button class="btn-sm btn-danger-sm" onclick="revokeKey('${k.id}')">Revoke</button>
-                        </td>
-                    </tr>
-                `).join('')}
-                </tbody>
-            </table>`}
-        `;
-    } catch (err) {
-        c.innerHTML = `<div style="color:#f87171;">Failed to load keys: ${escapeHtml(err.message)}</div>`;
-    }
+            ${keys.length ? `<table class="data-table"><thead><tr><th>Key</th><th>Status</th><th>HWID</th><th>Exec</th><th>Expires</th><th></th></tr></thead><tbody>
+            ${keys.map(k => `<tr>
+                <td class="mono">${escapeHtml(k.key)}</td>
+                <td>${escapeHtml(k.status)}</td>
+                <td class="mono">${k.hwid ? escapeHtml(k.hwid.slice(0,10)+'…') : '<span style="color:#6b7280;">unbound</span>'}</td>
+                <td>${k.execution_count||0}</td>
+                <td>${k.expires_at ? new Date(k.expires_at).toLocaleDateString() : 'Never'}</td>
+                <td><button class="btn-sm" onclick="resetKeyHwid('${k.id}')">Reset HWID</button> <button class="btn-sm btn-danger-sm" onclick="revokeKey('${k.id}')">Revoke</button></td>
+            </tr>`).join('')}</tbody></table>` : '<div class="empty-mini">No keys yet.</div>'}`;
+    } catch (err) { c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`; }
 }
-
-async function promptGenerateKey() {
-    const days = prompt('Expiry in days (leave empty for lifetime):', '');
-    const note = prompt('Note (optional):', '') || '';
-    try {
-        await api('/api/projects/' + currentProject.id + '/keys', {
-            method: 'POST',
-            body: JSON.stringify({
-                expires_days: days ? Number(days) : null,
-                note
-            })
-        });
-        showToast('Key generated', 'success');
-        switchTab('keys');
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
+async function genKey() {
+    const days = prompt('Expiry in days (blank = lifetime):', '');
+    try { await api('/api/projects/'+currentProject.id+'/keys', { method:'POST', body:JSON.stringify({ expires_days: days?Number(days):null }) }); showToast('Key generated','success'); switchTab('keys'); }
+    catch (err) { showToast('Error: '+err.message,'error'); }
 }
+async function revokeKey(id) { if(!confirm('Revoke this key?'))return; try{ await api(`/api/projects/${currentProject.id}/keys/${id}`,{method:'DELETE'}); showToast('Revoked','success'); switchTab('keys'); }catch(e){ showToast('Error: '+e.message,'error'); } }
+async function resetKeyHwid(id) { if(!confirm('Reset HWID?'))return; try{ await api(`/api/projects/${currentProject.id}/keys/${id}/reset-hwid`,{method:'POST'}); showToast('HWID reset','success'); switchTab('keys'); }catch(e){ showToast('Error: '+e.message,'error'); } }
 
-async function revokeKey(id) {
-    if (!confirm('Revoke this key?')) return;
-    try {
-        await api(`/api/projects/${currentProject.id}/keys/${id}`, { method: 'DELETE' });
-        showToast('Key revoked', 'success');
-        switchTab('keys');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
-}
-
-async function resetKeyHwid(id) {
-    if (!confirm('Reset HWID for this key?')) return;
-    try {
-        await api(`/api/projects/${currentProject.id}/keys/${id}/reset-hwid`, { method: 'POST' });
-        showToast('HWID reset', 'success');
-        switchTab('keys');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
-}
-
-// ---------- WHITELIST ----------
-async function renderWhitelistTab(c) {
+async function whitelistTab(c) {
     try {
         const { whitelist } = await api('/api/projects/' + currentProject.id + '/whitelist');
         c.innerHTML = `
-            <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
-                <input id="wlIdent" placeholder="Identifier (discord id, hwid, key…)" style="flex:1; min-width:200px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                <select id="wlType" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                    <option value="discord_id">Discord ID</option>
-                    <option value="hwid">HWID</option>
-                    <option value="key">Key</option>
-                    <option value="user_id">User ID</option>
-                </select>
-                <input id="wlNote" placeholder="Note (optional)" style="width:180px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                <button class="btn btn-primary" onclick="addWhitelist()">Add</button>
+            <div class="row-inline">
+                <input id="wlIdent" placeholder="Identifier" style="flex:1; min-width:160px;">
+                <select id="wlType"><option value="discord_id">Discord ID</option><option value="hwid">HWID</option><option value="key">Key</option><option value="user_id">User ID</option></select>
+                <input id="wlNote" placeholder="Note" style="width:140px;">
+                <button class="btn btn-primary btn-sm" onclick="addWl()">Add</button>
             </div>
-            ${whitelist.length === 0 ? '<div class="empty-state"><p>Whitelist is empty.</p></div>' : `
-            <table class="data-table">
-                <thead><tr><th>Identifier</th><th>Type</th><th>Note</th><th>Added</th><th></th></tr></thead>
-                <tbody>
-                ${whitelist.map(w => `
-                    <tr>
-                        <td class="mono">${escapeHtml(w.identifier)}</td>
-                        <td>${escapeHtml(w.type)}</td>
-                        <td>${escapeHtml(w.note || '')}</td>
-                        <td>${new Date(w.created_at).toLocaleDateString()}</td>
-                        <td><button class="btn-sm btn-danger-sm" onclick="removeWhitelist('${w.id}')">Remove</button></td>
-                    </tr>
-                `).join('')}
-                </tbody>
-            </table>`}
-        `;
-    } catch (err) {
-        c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`;
-    }
+            ${whitelist.length ? `<table class="data-table"><thead><tr><th>Identifier</th><th>Type</th><th>Note</th><th></th></tr></thead><tbody>
+            ${whitelist.map(w => `<tr><td class="mono">${escapeHtml(w.identifier)}</td><td>${escapeHtml(w.type)}</td><td>${escapeHtml(w.note||'')}</td><td><button class="btn-sm btn-danger-sm" onclick="rmWl('${w.id}')">Remove</button></td></tr>`).join('')}
+            </tbody></table>` : '<div class="empty-mini">Whitelist is empty.</div>'}`;
+    } catch (err) { c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`; }
 }
-
-async function addWhitelist() {
+async function addWl() {
     const identifier = document.getElementById('wlIdent').value.trim();
     const type = document.getElementById('wlType').value;
     const note = document.getElementById('wlNote').value.trim();
-    if (!identifier) return showToast('Identifier required', 'error');
-    try {
-        await api('/api/projects/' + currentProject.id + '/whitelist', {
-            method: 'POST', body: JSON.stringify({ identifier, type, note })
-        });
-        showToast('Added to whitelist', 'success');
-        switchTab('whitelist');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    if (!identifier) return showToast('Identifier required','error');
+    try { await api('/api/projects/'+currentProject.id+'/whitelist',{method:'POST',body:JSON.stringify({identifier,type,note})}); showToast('Added','success'); switchTab('whitelist'); }
+    catch (err) { showToast('Error: '+err.message,'error'); }
 }
+async function rmWl(id) { if(!confirm('Remove?'))return; try{ await api(`/api/projects/${currentProject.id}/whitelist/${id}`,{method:'DELETE'}); showToast('Removed','success'); switchTab('whitelist'); }catch(e){ showToast('Error: '+e.message,'error'); } }
 
-async function removeWhitelist(id) {
-    if (!confirm('Remove from whitelist?')) return;
-    try {
-        await api(`/api/projects/${currentProject.id}/whitelist/${id}`, { method: 'DELETE' });
-        showToast('Removed', 'success');
-        switchTab('whitelist');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
-}
-
-// ---------- BLACKLIST ----------
-async function renderBlacklistTab(c) {
+async function blacklistTab(c) {
     try {
         const { blacklist } = await api('/api/projects/' + currentProject.id + '/blacklist');
         c.innerHTML = `
-            <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
-                <input id="blIdent" placeholder="Identifier" style="flex:1; min-width:180px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                <select id="blType" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                    <option value="discord_id">Discord ID</option>
-                    <option value="hwid">HWID</option>
-                    <option value="key">Key</option>
-                    <option value="ip">IP</option>
-                    <option value="user_id">User ID</option>
-                </select>
-                <input id="blReason" placeholder="Reason" style="width:180px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                <input id="blDays" type="number" min="1" placeholder="Days (∞)" style="width:100px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 12px; color:#fff; font-family:inherit;">
-                <button class="btn btn-primary" onclick="addBlacklist()">Ban</button>
+            <div class="row-inline">
+                <input id="blIdent" placeholder="Identifier" style="flex:1; min-width:140px;">
+                <select id="blType"><option value="discord_id">Discord ID</option><option value="hwid">HWID</option><option value="key">Key</option><option value="ip">IP</option><option value="user_id">User ID</option></select>
+                <input id="blReason" placeholder="Reason" style="width:130px;">
+                <input id="blDays" type="number" min="1" placeholder="Days ∞" style="width:80px;">
+                <button class="btn btn-primary btn-sm" onclick="addBl()">Ban</button>
             </div>
-            ${blacklist.length === 0 ? '<div class="empty-state"><p>Blacklist is empty.</p></div>' : `
-            <table class="data-table">
-                <thead><tr><th>Identifier</th><th>Type</th><th>Reason</th><th>Expires</th><th></th></tr></thead>
-                <tbody>
-                ${blacklist.map(b => `
-                    <tr>
-                        <td class="mono">${escapeHtml(b.identifier)}</td>
-                        <td>${escapeHtml(b.type)}</td>
-                        <td>${escapeHtml(b.reason || '')}</td>
-                        <td>${b.ban_expire ? new Date(b.ban_expire).toLocaleDateString() : '<span style="color:#f87171;">Permanent</span>'}</td>
-                        <td><button class="btn-sm btn-danger-sm" onclick="removeBlacklist('${b.id}')">Unban</button></td>
-                    </tr>
-                `).join('')}
-                </tbody>
-            </table>`}
-        `;
-    } catch (err) {
-        c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`;
-    }
+            ${blacklist.length ? `<table class="data-table"><thead><tr><th>Identifier</th><th>Type</th><th>Reason</th><th>Expires</th><th></th></tr></thead><tbody>
+            ${blacklist.map(b => `<tr><td class="mono">${escapeHtml(b.identifier)}</td><td>${escapeHtml(b.type)}</td><td>${escapeHtml(b.reason||'')}</td><td>${b.ban_expire ? new Date(b.ban_expire).toLocaleDateString() : '<span style="color:#f87171;">Permanent</span>'}</td><td><button class="btn-sm btn-danger-sm" onclick="rmBl('${b.id}')">Unban</button></td></tr>`).join('')}
+            </tbody></table>` : '<div class="empty-mini">Blacklist is empty.</div>'}`;
+    } catch (err) { c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`; }
 }
-
-async function addBlacklist() {
+async function addBl() {
     const identifier = document.getElementById('blIdent').value.trim();
     const type = document.getElementById('blType').value;
     const reason = document.getElementById('blReason').value.trim();
     const days = document.getElementById('blDays').value;
-    if (!identifier) return showToast('Identifier required', 'error');
-    try {
-        await api('/api/projects/' + currentProject.id + '/blacklist', {
-            method: 'POST',
-            body: JSON.stringify({ identifier, type, reason, ban_days: days ? Number(days) : null })
-        });
-        showToast('Added to blacklist', 'success');
-        switchTab('blacklist');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    if (!identifier) return showToast('Identifier required','error');
+    try { await api('/api/projects/'+currentProject.id+'/blacklist',{method:'POST',body:JSON.stringify({identifier,type,reason,ban_days:days?Number(days):null})}); showToast('Banned','success'); switchTab('blacklist'); }
+    catch (err) { showToast('Error: '+err.message,'error'); }
 }
+async function rmBl(id) { if(!confirm('Unban?'))return; try{ await api(`/api/projects/${currentProject.id}/blacklist/${id}`,{method:'DELETE'}); showToast('Unbanned','success'); switchTab('blacklist'); }catch(e){ showToast('Error: '+e.message,'error'); } }
 
-async function removeBlacklist(id) {
-    if (!confirm('Unban this entry?')) return;
-    try {
-        await api(`/api/projects/${currentProject.id}/blacklist/${id}`, { method: 'DELETE' });
-        showToast('Unbanned', 'success');
-        switchTab('blacklist');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
-}
-
-// ---------- LOGS ----------
-async function renderLogsTab(c) {
+async function logsTab(c) {
     try {
         const { logs } = await api('/api/projects/' + currentProject.id + '/logs?per_page=100');
-        c.innerHTML = `
-            <div style="color:#a0a0b8; font-size:13px; margin-bottom:12px;">
-                Showing latest ${logs.length} events
-            </div>
-            ${logs.length === 0 ? '<div class="empty-state"><p>No logs yet.</p></div>' : `
-            <table class="data-table">
-                <thead><tr>
-                    <th>Time</th><th>Event</th><th>Status</th><th>Message</th><th>IP</th><th>HWID</th>
-                </tr></thead>
-                <tbody>
-                ${logs.map(l => `
-                    <tr>
-                        <td>${new Date(l.created_at).toLocaleString()}</td>
-                        <td class="mono">${escapeHtml(l.event_type)}</td>
-                        <td>${statusPill(l.status)}</td>
-                        <td>${escapeHtml(l.message || '')}</td>
-                        <td class="mono">${escapeHtml(l.ip || '')}</td>
-                        <td class="mono" title="${escapeHtml(l.hwid || '')}">${l.hwid ? escapeHtml(l.hwid.slice(0, 10) + '…') : ''}</td>
-                    </tr>
-                `).join('')}
-                </tbody>
-            </table>`}
-        `;
-    } catch (err) {
-        c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`;
-    }
+        c.innerHTML = logs.length
+            ? `<table class="data-table"><thead><tr><th>Time</th><th>Event</th><th>Status</th><th>Message</th><th>IP</th></tr></thead><tbody>
+               ${logs.map(l => `<tr><td>${new Date(l.created_at).toLocaleString()}</td><td class="mono">${escapeHtml(l.event_type)}</td><td>${escapeHtml(l.status)}</td><td>${escapeHtml(l.message||'')}</td><td class="mono">${escapeHtml(l.ip||'')}</td></tr>`).join('')}
+               </tbody></table>`
+            : '<div class="empty-mini">No logs yet.</div>';
+    } catch (err) { c.innerHTML = `<div style="color:#f87171;">${escapeHtml(err.message)}</div>`; }
 }
 
-// ---------- SETTINGS ----------
-function renderSettingsTab(c) {
+function configTab(c) {
     const s = currentProject.settings || {};
     c.innerHTML = `
-        <div style="max-width:600px;">
-            <div class="form-group">
-                <label>Whitelist mode</label>
-                <select id="setWlMode">
-                    <option value="open" ${s.whitelist_mode !== 'strict' ? 'selected' : ''}>Open — anyone with a valid key</option>
-                    <option value="strict" ${s.whitelist_mode === 'strict' ? 'selected' : ''}>Strict — only whitelisted identifiers</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Discord webhook URL (for log forwarding)</label>
-                <input id="setWebhook" type="text" placeholder="https://discord.com/api/webhooks/…" value="${escapeAttr(s.webhook_url || '')}">
-            </div>
-            <div class="form-group">
-                <label>HWID reset cooldown (hours, 0 = disabled)</label>
-                <input id="setCooldown" type="number" min="0" value="${s.hwid_reset_cooldown_hours ?? 0}">
-            </div>
-            <div class="form-group">
-                <label>Max executions per key (0 = unlimited)</label>
-                <input id="setMaxExec" type="number" min="0" value="${s.max_executions ?? 0}">
-            </div>
-            <button class="btn btn-primary" onclick="saveSettings()">Save settings</button>
-        </div>
-    `;
+        <div class="form-group"><label>Whitelist mode</label>
+            <select id="cfgWl"><option value="open" ${s.whitelist_mode!=='strict'?'selected':''}>Open — any valid key</option><option value="strict" ${s.whitelist_mode==='strict'?'selected':''}>Strict — whitelisted only</option></select></div>
+        <div class="form-group"><label>Discord webhook URL</label><input id="cfgWebhook" value="${escapeAttr(s.webhook_url||'')}" placeholder="https://discord.com/api/webhooks/…"></div>
+        <div class="form-group"><label>HWID reset cooldown (hours)</label><input id="cfgCooldown" type="number" min="0" value="${s.hwid_reset_cooldown_hours??0}"></div>
+        <button class="btn btn-primary btn-sm" onclick="saveConfig()">Save settings</button>
+        <div style="margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.08);">
+            <button class="btn-sm" onclick="openProjectModal('${currentProject.id}')">Edit name / version</button>
+        </div>`;
 }
-
-async function saveSettings() {
+async function saveConfig() {
     const settings = {
-        whitelist_mode: document.getElementById('setWlMode').value,
-        webhook_url: document.getElementById('setWebhook').value.trim(),
-        hwid_reset_cooldown_hours: Number(document.getElementById('setCooldown').value) || 0,
-        max_executions: Number(document.getElementById('setMaxExec').value) || 0
+        whitelist_mode: document.getElementById('cfgWl').value,
+        webhook_url: document.getElementById('cfgWebhook').value.trim(),
+        hwid_reset_cooldown_hours: Number(document.getElementById('cfgCooldown').value)||0
     };
-    try {
-        const { project } = await api('/api/projects/' + currentProject.id, {
-            method: 'PATCH', body: JSON.stringify({ settings })
-        });
-        currentProject = project;
-        showToast('Settings saved', 'success');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    try { const { project } = await api('/api/projects/'+currentProject.id, { method:'PATCH', body:JSON.stringify({ settings }) }); currentProject = project; showToast('Settings saved','success'); }
+    catch (err) { showToast('Error: '+err.message,'error'); }
 }
 
 // ---------- Helpers ----------
-function statBox(label, value) {
-    return `<div class="stat-box"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
-}
-
-function statusPill(status) {
-    const map = {
-        active: 'badge-active', success: 'badge-active',
-        disabled: 'badge-disabled', failed: 'badge-disabled',
-        revoked: 'badge-disabled', expired: 'badge-archived',
-        warning: 'badge-archived', info: 'badge-archived'
-    };
-    return `<span class="badge-status ${map[status] || 'badge-archived'}">${escapeHtml(status || 'unknown')}</span>`;
-}
-
-function escapeHtml(s) {
-    if (s === null || s === undefined) return '';
-    return String(s)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-function escapeAttr(s) { return escapeHtml(s).replace(/\n/g, ' '); }
-
-async function copyText(t) {
-    try {
-        await navigator.clipboard.writeText(t);
-        showToast('Copied to clipboard', 'success');
-    } catch { showToast('Copy failed', 'error'); }
-}
-
-function showToast(msg, type = 'info') {
-    const c = document.getElementById('toastContainer');
-    if (!c) return alert(msg);
+function mini(l, v) { return `<div class="mini-stat"><div class="l">${l}</div><div class="v">${v}</div></div>`; }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function escapeHtml(s) { if (s==null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escapeAttr(s) { return escapeHtml(s).replace(/\n/g,' '); }
+async function copyText(t) { try { await navigator.clipboard.writeText(t); showToast('Copied','success'); } catch { showToast('Copy failed','error'); } }
+function showToast(msg, type='info') {
+    const c = document.getElementById('toastContainer'); if (!c) return alert(msg);
     const t = document.createElement('div');
-    t.className = 'toast toast-' + type;
     t.textContent = msg;
-    t.style.cssText = `
-        background:#14141f; border:1px solid rgba(255,255,255,0.1);
-        border-left:3px solid ${type === 'success' ? '#4ade80' : type === 'error' ? '#f87171' : '#7c3aed'};
-        color:#fff; padding:12px 16px; border-radius:8px;
-        margin-bottom:8px; font-size:14px; max-width:360px;
-        animation:slideIn 0.3s ease;
-    `;
+    t.style.cssText = `background:#14141f; border:1px solid rgba(255,255,255,0.1); border-left:3px solid ${type==='success'?'#4ade80':type==='error'?'#f87171':'#7c3aed'}; color:#fff; padding:12px 16px; border-radius:8px; margin-bottom:8px; font-size:14px; max-width:360px; animation:slideIn 0.3s ease;`;
     c.appendChild(t);
-    setTimeout(() => {
-        t.style.animation = 'slideIn 0.3s ease reverse';
-        setTimeout(() => t.remove(), 300);
-    }, 3500);
+    setTimeout(() => { t.style.animation='slideIn 0.3s ease reverse'; setTimeout(()=>t.remove(),300); }, 3500);
 }
+
+// close modal on overlay click
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('show');
+});
