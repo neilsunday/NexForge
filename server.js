@@ -22,16 +22,58 @@ if (SUPABASE_SERVICE_KEY) {
 }
 
 // ========== Middleware ==========
+// Security headers on every response
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    next();
+});
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
+
+// ========== Rate Limiter ==========
+// In-memory sliding-window limiter: 30 requests per IP per 60 seconds on load endpoints
+const rateBuckets = new Map();
+const RATE_LIMIT = 30;
+const RATE_WINDOW_MS = 60_000;
+
+function rateLimit(req, res, next) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+    const now = Date.now();
+    const bucket = rateBuckets.get(ip) || [];
+    // Drop timestamps outside window
+    const recent = bucket.filter(t => now - t < RATE_WINDOW_MS);
+    if (recent.length >= RATE_LIMIT) {
+        return res.status(429).type('text/plain').send('error("NexaKS: Too many requests - slow down")');
+    }
+    recent.push(now);
+    rateBuckets.set(ip, recent);
+    // Occasional cleanup to prevent memory growth
+    if (rateBuckets.size > 5000) {
+        for (const [k, v] of rateBuckets) {
+            if (v.every(t => now - t >= RATE_WINDOW_MS)) rateBuckets.delete(k);
+        }
+    }
+    next();
+}
 
 // ========== HTML Routes ==========
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
 app.get('/projects', (req, res) => res.sendFile(path.join(__dirname, 'projects.html')));
 app.get('/help', (req, res) => res.sendFile(path.join(__dirname, 'help.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+app.get('/admin', (req, res) => {
+    // Basic gate: require a Supabase auth cookie to even load the admin page.
+    // Full authorization (is_admin check) happens client-side + is enforced by RLS.
+    const cookies = req.headers.cookie || '';
+    const hasAuth = /sb-[a-z0-9-]+-auth-token/i.test(cookies);
+    if (!hasAuth) return res.redirect('/');
+    res.sendFile(path.join(__dirname, 'admin.html'));
+});
 
 // ========== API Endpoints ==========
 
@@ -52,7 +94,7 @@ app.get('/api/health', (req, res) => {
 // Called by Lua script with: ?license=NXKS-...&hwid=abc123
 // Returns: script payload (plain text) if authorized, error message if not
 // ========================================
-app.get('/api/verify', async (req, res) => {
+app.get('/api/verify', rateLimit, async (req, res) => {
     const { license, hwid } = req.query;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
 
@@ -69,8 +111,16 @@ app.get('/api/verify', async (req, res) => {
         );
     }
 
+    // Length + format validation (prevents DoS via giant strings)
+    if (license.length > 32 || hwid.length > 256) {
+        return res.status(400).type('text/plain').send('error("NexaKS: Invalid parameter length")');
+    }
     const licenseUpper = license.trim().toUpperCase();
     const hwidClean = hwid.trim().substring(0, 128); // Prevent abuse
+    // Only allow key-safe characters (letters, numbers, dashes)
+    if (!/^[A-Z0-9-]+$/.test(licenseUpper)) {
+        return res.status(400).type('text/plain').send('error("NexaKS: Invalid license format")');
+    }
 
     try {
         // Fetch key (with linked project)
@@ -295,7 +345,7 @@ function fallbackPayload(key) {
     return `-- NexaKS: No script configured yet
 -- License: ${key.key} (${key.plan.toUpperCase()})
 print("[NexaKS] Verified but no script configured yet")
-print("[NexaKS] Admin: please add a script for '${key.plan}' plan sa /admin")
+print("[NexaKS] Admin: please add a script for the '${key.plan}' plan in the admin panel")
 `;
 }
 
@@ -332,7 +382,7 @@ async function logProject(projectId, userId, key, action, status, message, ip) {
 // Keyless scripts run without a key. Key-based scripts require ?key=NXKS-...
 // Usage: loadstring(game:HttpGet(".../api/load/myproject?script=abcd1234"))()
 // ========================================
-app.get('/api/load/:slug', async (req, res) => {
+app.get('/api/load/:slug', rateLimit, async (req, res) => {
     const slug = (req.params.slug || '').trim().toLowerCase();
     const loadId = req.query.script ? String(req.query.script).trim() : null;
     const key = req.query.key ? String(req.query.key).trim().toUpperCase() : null;
