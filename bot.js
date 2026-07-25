@@ -404,43 +404,77 @@ async function handleRedeem(interaction, key) {
     });
 }
 
-async function handleGetScript(interaction) {
+async function handleGetScript(interaction, projectSlug) {
     const { data: user } = await sb.from('users').select('*').eq('discord_id', interaction.user.id).maybeSingle();
     if (!user) return interaction.editReply({ embeds: [embed('No Account', 'Redeem a key first with the **Redeem Key** button.', 0xef4444)] });
 
-    const { data: key } = await sb.from('keys').select('*').eq('user_id', user.id).eq('status', 'active')
-        .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (!key) return interaction.editReply({ embeds: [embed('No Active License', 'You have no active license. Redeem one first.', 0xef4444)] });
+    const { data: keys } = await sb.from('keys').select('*')
+        .eq('user_id', user.id).eq('status', 'active')
+        .order('created_at', { ascending: false });
+    if (!keys || keys.length === 0) {
+        return interaction.editReply({ embeds: [embed('No Active License', 'You have no active license. Redeem one first.', 0xef4444)] });
+    }
 
-    const loader = [
-        '-- NexaKS Authentication Loader',
-        'local license = "' + key.key + '"',
-        'local hwid = game:GetService("RbxAnalyticsService"):GetClientId()',
-        'local url = "' + SITE_URL + '/api/verify?license=" .. license .. "&hwid=" .. hwid',
-        '',
-        'local ok, response = pcall(function() return game:HttpGet(url, true) end)',
-        'if not ok then warn("[NexaKS] Network error: " .. tostring(response)) return end',
-        'if not response or response == "" then warn("[NexaKS] Empty response from server") return end',
-        '',
-        'local success, err = pcall(function() loadstring(response)() end)',
-        'if not success then warn("[NexaKS] " .. tostring(err)) end'
-    ].join('\n');
+    let key = null, project = null;
+    if (projectSlug) {
+        const { data: proj } = await sb.from('projects').select('*').eq('slug', projectSlug).maybeSingle();
+        if (!proj) return interaction.editReply({ embeds: [embed('Not Found', 'Project no longer exists.', 0xef4444)] });
+        project = proj;
+        key = keys.find(k => k.project_id === proj.id) || keys[0];
+    } else {
+        key = keys[0];
+        if (key.project_id) {
+            const { data: proj } = await sb.from('projects').select('*').eq('id', key.project_id).maybeSingle();
+            project = proj;
+        }
+    }
 
-    // Try DM
+    // No project attached anywhere -> short legacy verify loader
+    if (!project) {
+        const loader = '_G.script_key = "' + key.key + '"\n' +
+            'loadstring(game:HttpGet("' + SITE_URL + '/api/verify?license=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
+        return sendLoader(interaction, loader, true);
+    }
+
+    // Fetch published script for this project
+    const { data: scripts } = await sb.from('project_scripts')
+        .select('*').eq('project_id', project.id).eq('status', 'published')
+        .order('updated_at', { ascending: false });
+    if (!scripts || scripts.length === 0) {
+        return interaction.editReply({ embeds: [embed('No Script Yet', 'Project **' + project.name + '** has no published script.', 0xf59e0b)] });
+    }
+    // Prefer exact plan, else free, else first
+    const script = scripts.find(s => s.plan === key.plan) || scripts.find(s => s.plan === 'free') || scripts[0];
+
+    const base = SITE_URL + '/api/load/' + project.slug + (script.load_id ? '?script=' + script.load_id : '');
+    let loader;
+    if (script.keyless) {
+        loader = 'loadstring(game:HttpGet("' + base + '"))()';
+    } else {
+        const sep = base.includes('?') ? '&' : '?';
+        loader = '_G.script_key = "' + key.key + '"\n' +
+            'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key))()';
+    }
+    return sendLoader(interaction, loader, !script.keyless);
+}
+
+async function sendLoader(interaction, loader, hasKey) {
+    const warn = hasKey
+        ? '**Warning:** Do not share this loader - it contains your personal key. Sharing = ban.'
+        : 'This is a keyless loader - safe to share within terms.';
+    const codeBlock = '```lua\n' + loader + '\n```';
     try {
         await interaction.user.send({
             embeds: [embed('Your NexaKS Loader',
-                'Paste this into your Roblox executor:\n\n```lua\n' + loader + '\n```\n\n' +
-                '**Warning:** Do not share this loader â€” it contains your personal key. Sharing = ban.',
+                'Paste this into your Roblox executor:\n\n' + codeBlock + '\n\n' + warn,
                 0x7c3aed)]
         });
         return interaction.editReply({ embeds: [embed('Sent via DM', 'Check your direct messages for the loader script.', 0x10b981)] });
     } catch (err) {
-        // DMs closed - reply ephemerally
         return interaction.editReply({
             embeds: [embed('Your Loader (DMs closed)',
-                'Copy this loader:\n\n```lua\n' + loader + '\n```\n\n' +
-                'For future privacy, enable DMs from server members.', 0x7c3aed)]
+                'Copy this loader:\n\n' + codeBlock + '\n\nEnable DMs from server members for privacy.',
+                0x7c3aed)]
         });
     }
 }
@@ -569,7 +603,7 @@ async function handleGenerate(interaction, plan, duration, qty) {
 
     return interaction.editReply({ embeds: [embed('Keys Generated',
         'Generated **' + qty + '** ' + plan.toUpperCase() + ' keys (' + duration + ')\n\n' +
-        keys.map(k => '`' + k + '`').join('\n') + '\n\n*Save these â€” hindi na uulit yung display.*', 0x10b981)] });
+        keys.map(k => '`' + k + '`').join('\n') + '\n\n*Save these Ã¢â‚¬â€ hindi na uulit yung display.*', 0x10b981)] });
 }
 
 async function handleRevoke(interaction, key) {
