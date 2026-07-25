@@ -21,12 +21,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://miscyjgmvxbshvtiecuu.s
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SITE_URL = process.env.SITE_URL || 'https://keyora-gyuu.onrender.com';
 
-// Project slug -> Discord role ID mapping
-// Env vars override the defaults if set.
+// Project slug -> Discord role ID mapping (hardcoded)
 const PROJECT_ROLE_MAP = {
-    macro:   process.env.DISCORD_ROLE_MACRO   || '1530196461730533556',
-    premium: process.env.DISCORD_ROLE_PREMIUM || '1530196527740358697',
-    private: process.env.DISCORD_ROLE_PRIVATE || '1530196626503897138'
+    macro:   '1530196461730533556',
+    premium: '1530196527740358697',
+    private: '1530196626503897138'
 };
 
 if (!BOT_TOKEN || !CLIENT_ID) {
