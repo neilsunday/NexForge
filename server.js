@@ -152,8 +152,10 @@ app.get('/api/verify', async (req, res) => {
         // In production, mag-return ka ng loadstring URL sa protected script mo
         // Halimbawa: return script from private GitHub gist, or generated code
 
-        const scriptPayload = generateScriptPayload(key);
-        return res.status(200).type('text/plain').send(scriptPayload);
+        // Fetch script from DB based on plan
+        const scriptContent = await fetchScriptForKey(key);
+        const finalPayload = scriptContent || fallbackPayload(key);
+        return res.status(200).type('text/plain').send(finalPayload);
 
     } catch (err) {
         console.error('Verify error:', err);
@@ -166,38 +168,49 @@ app.get('/api/verify', async (req, res) => {
 });
 
 /**
- * Generate the actual script payload to send back
- * REPLACE THIS with your actual protected script content
+ * Fetch the actual Lua script from the scripts table
+ * based on the user's plan.
+ * Plan hierarchy: enterprise > pro > free
  */
-function generateScriptPayload(key) {
-    // Option 1: Return a simple test script (default)
-    return `-- NexaKS Authorized Payload
+async function fetchScriptForKey(key) {
+    try {
+        // Use the SQL helper function we created
+        const { data, error } = await sb.rpc('get_script_for_plan', {
+            user_plan: key.plan
+        });
+
+        if (error) {
+            console.error('Script fetch RPC error:', error);
+            return null;
+        }
+
+        if (!data || data.length === 0) {
+            return null;
+        }
+
+        const script = data[0];
+
+        // Increment script execution counter (fire and forget)
+        sb.from('scripts').update({
+            execution_count: (script.execution_count || 0) + 1
+        }).eq('id', script.id).then(() => {}, () => {});
+
+        return script.script_content;
+    } catch (err) {
+        console.error('fetchScriptForKey:', err);
+        return null;
+    }
+}
+
+/**
+ * Fallback payload when no script is configured yet
+ */
+function fallbackPayload(key) {
+    return `-- NexaKS: No script configured yet
 -- License: ${key.key} (${key.plan.toUpperCase()})
--- Executions: ${(key.execution_count || 0) + 1}
-
-print("[NexaKS] Script authorized for " .. game.Players.LocalPlayer.Name)
-print("[NexaKS] Plan: ${key.plan.toUpperCase()}")
-print("[NexaKS] License valid until: ${key.expires_at ? new Date(key.expires_at).toISOString().split('T')[0] : 'Lifetime'}")
-
--- REPLACE THIS SECTION with your actual script
--- Example: loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_ORG/PRIVATE_REPO/main/script.lua"))()
-
-game.StarterGui:SetCore("SendNotification", {
-    Title = "NexaKS",
-    Text = "Script loaded successfully (${key.plan.toUpperCase()})",
-    Duration = 5
-})
+print("[NexaKS] Verified but no script configured yet")
+print("[NexaKS] Admin: please add a script for '${key.plan}' plan sa /admin")
 `;
-
-    // Option 2: Fetch from private GitHub gist (recommended for production)
-    // return await fetch('https://raw.githubusercontent.com/private/script.lua', {
-    //     headers: { 'Authorization': 'token ghp_xxx' }
-    // }).then(r => r.text());
-
-    // Option 3: Different scripts per plan
-    // if (key.plan === 'enterprise') return enterpriseScript;
-    // if (key.plan === 'pro') return proScript;
-    // return freeScript;
 }
 
 async function logAttempt(userId, key, action, status, message, ip) {
