@@ -187,6 +187,13 @@
                         <label class="form-label">HWID Reset Limit</label>
                         <input type="number" class="form-input" id="genResets" value="5" min="0" max="99">
                     </div>
+                    <div class="form-group">
+                        <label class="form-label">Project</label>
+                        <select class="form-select" id="genProject">
+                            <option value="">-- None (unattached) --</option>
+                        </select>
+                        <div class="form-hint">Attach keys to a project so users get the right script</div>
+                    </div>
                 </div>
 
                 <button class="btn btn-primary" onclick="generateKeys()" id="genBtn">
@@ -321,7 +328,7 @@
     <div class="modal-overlay" id="scriptModal">
         <div class="modal" style="max-width:640px;">
             <div class="modal-title" id="scriptModalTitle">Add New Script</div>
-            <div class="modal-desc">Configure the Lua script na i-return sa users based sa plan nila.</div>
+            <div class="modal-desc">Configure the Lua script returned to users based on their plan.</div>
 
             <div class="form-group">
                 <label class="form-label">Script Name</label>
@@ -330,7 +337,7 @@
 
             <div class="form-group">
                 <label class="form-label">Description (optional)</label>
-                <input type="text" class="form-input" id="scriptDescInput" placeholder="Short description sa admin panel">
+                <input type="text" class="form-input" id="scriptDescInput" placeholder="Short description for admin panel">
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -404,7 +411,7 @@
     <div class="modal-overlay" id="bulkDeleteModal">
         <div class="modal">
             <div class="modal-title">Bulk Delete Keys</div>
-            <div class="modal-desc">Deletes keys from the database. <strong>Active keys are never deleted</strong> via bulk â€” use individual revoke for those.</div>
+            <div class="modal-desc">Deletes keys from the database. <strong>Active keys are never deleted</strong> via bulk - use individual revoke for those.</div>
 
             <div class="form-group">
                 <label class="form-label">Which keys to delete</label>
