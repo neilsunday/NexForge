@@ -206,7 +206,7 @@ async function ensureUserRow(discordUser) {
             return meta.provider_id === discordUser.id || meta.sub === discordUser.id;
         });
         if (authUser) {
-            // Row may already exist keyed by the auth id â€” just add discord_id + return
+            // Row may already exist keyed by the auth id - just add discord_id + return
             const { data: rowById } = await sb.from('users')
                 .select('*').eq('id', authUser.id).maybeSingle();
             if (rowById) {
@@ -219,7 +219,7 @@ async function ensureUserRow(discordUser) {
                 }
                 return { ...rowById, discord_id: discordUser.id };
             }
-            // Auth user exists but no profile row yet â€” create one using the auth id
+            // Auth user exists but no profile row yet - create one using the auth id
             const { data: linked, error: linkErr } = await sb.from('users').insert({
                 id: authUser.id,
                 discord_id: discordUser.id,
@@ -230,7 +230,7 @@ async function ensureUserRow(discordUser) {
             console.error('Link-to-auth insert failed:', linkErr);
         }
     } catch (e) {
-        // listUsers may fail (permissions, network) â€” fall through to plain insert
+        // listUsers may fail (permissions, network) - fall through to plain insert
         console.warn('Auth link lookup skipped:', e.message);
     }
 
@@ -1037,7 +1037,7 @@ async function handleSubscription(interaction) {
         : 'Lifetime';
     const daysLeft = key.expires_at
         ? Math.max(0, Math.ceil((new Date(key.expires_at) - new Date()) / 86400000)) + ' days'
-        : 'âˆž';
+        : 'Unlimited';
 
     return interaction.editReply({ embeds: [embed('Your Subscription',
         '**Plan:** ' + key.plan.toUpperCase() + '\n' +
@@ -1065,31 +1065,31 @@ async function handleProfile(interaction) {
 
 async function handleHelp(interaction) {
     const userCmds =
-        '`/redeem` â€” Redeem a key.\n' +
-        '`/loader` â€” Get your loader script.\n' +
-        '`/script` â€” Get the latest script.\n' +
-        '`/resethwid` â€” Reset your HWID (every 15 hours).\n' +
-        '`/claimrole` â€” Claim your buyer role.\n' +
-        '`/key view` â€” View your redeemed key.\n' +
-        '`/project view` â€” View your current project.\n' +
-        '`/subscription` â€” Check your plan.\n' +
-        '`/profile` â€” View your account information.\n' +
-        '`/help` â€” Show all commands.\n' +
-        '`/status` â€” Check service status.';
+        '`/redeem` - Redeem a key.\n' +
+        '`/loader` - Get your loader script.\n' +
+        '`/script` - Get the latest script.\n' +
+        '`/resethwid` - Reset your HWID (every 15 hours).\n' +
+        '`/claimrole` - Claim your buyer role.\n' +
+        '`/key view` - View your redeemed key.\n' +
+        '`/project view` - View your current project.\n' +
+        '`/subscription` - Check your plan.\n' +
+        '`/profile` - View your account information.\n' +
+        '`/help` - Show all commands.\n' +
+        '`/status` - Check service status.';
 
     const adminCmds =
-        '`/key create` â€” Generate a key.\n' +
-        '`/key delete` â€” Delete a key.\n' +
-        '`/key extend` â€” Extend a key.\n' +
-        '`/key revoke` â€” Revoke a key.\n' +
-        '`/key info` â€” View key information.\n' +
-        '`/user info` â€” View user information.\n' +
-        '`/user blacklist` â€” Blacklist a user.\n' +
-        '`/user unblacklist` â€” Remove blacklist.\n' +
-        '`/hwid reset` â€” Force reset HWID.\n' +
-        '`/project create` â€” Create a project.\n' +
-        '`/project delete` â€” Delete a project.\n' +
-        '`/project list` â€” View all projects.';
+        '`/key create` - Generate a key.\n' +
+        '`/key delete` - Delete a key.\n' +
+        '`/key extend` - Extend a key.\n' +
+        '`/key revoke` - Revoke a key.\n' +
+        '`/key info` - View key information.\n' +
+        '`/user info` - View user information.\n' +
+        '`/user blacklist` - Blacklist a user.\n' +
+        '`/user unblacklist` - Remove blacklist.\n' +
+        '`/hwid reset` - Force reset HWID.\n' +
+        '`/project create` - Create a project.\n' +
+        '`/project delete` - Delete a project.\n' +
+        '`/project list` - View all projects.';
 
     const isAdm = await isAdmin(interaction);
     const body = '**User Commands**\n' + userCmds + (isAdm ? '\n\n**Admin Commands**\n' + adminCmds : '');
@@ -1108,8 +1108,8 @@ async function handleStatus(interaction) {
     const mins = Math.floor((uptime % 3600) / 60);
 
     return interaction.editReply({ embeds: [embed('Service Status',
-        '**Bot:** ðŸŸ¢ Online\n' +
-        '**Database:** ' + (dbOk ? 'ðŸŸ¢ Connected' : 'ðŸ”´ Unreachable') + '\n' +
+        '**Bot:**  Online\n' +
+        '**Database:** ' + (dbOk ? ' Connected' : ' Unreachable') + '\n' +
         '**Uptime:** ' + hrs + 'h ' + mins + 'm\n' +
         '**Site:** ' + SITE_URL, dbOk ? 0x10b981 : 0xf59e0b)] });
 }
@@ -1179,7 +1179,7 @@ async function handleProjectList(interaction) {
         return interaction.editReply({ embeds: [embed('No Projects', 'No projects created yet.', 0xf59e0b)] });
     }
 
-    const list = projects.map(p => 'â€¢ **' + p.name + '** â€” `' + p.slug + '`').join('\n');
+    const list = projects.map(p => '* **' + p.name + '** - `' + p.slug + '`').join('\n');
     return interaction.editReply({ embeds: [embed('All Projects (' + projects.length + ')', list, 0x7c3aed)] });
 }
 
