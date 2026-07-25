@@ -1,0 +1,276 @@
+/* ==========================================================================
+   Keyora / NexaKS — Animations
+   --------------------------------------------------------------------------
+   Subtle, restrained motion. Nothing bouncy or attention-grabbing.
+   Respects prefers-reduced-motion.
+   Import at the top of style.css:  @import url("animations.css");
+   ========================================================================== */
+
+/* ---------- Keyframes ---------------------------------------------------- */
+
+/* Gentle rise + fade for on-load / on-scroll entrances */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Soft fade only */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Quiet sheen that crosses a primary button on hover */
+@keyframes sheen {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+
+/* Slow caret blink for the code block */
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Entrance animations ----------------------------------------- */
+/* Applied on load; staggered so sections settle in sequence, not all at once */
+
+.hero-badge {
+  animation: rise-in 0.6s var(--ease) both;
+}
+.hero-title {
+  animation: rise-in 0.7s var(--ease) 0.06s both;
+}
+.hero-subtitle {
+  animation: rise-in 0.7s var(--ease) 0.12s both;
+}
+.hero-buttons {
+  animation: rise-in 0.7s var(--ease) 0.18s both;
+}
+.trust-bar {
+  animation: rise-in 0.8s var(--ease) 0.26s both;
+}
+
+/* Section headers fade up when their section is reached (load-based fallback) */
+.section-header {
+  animation: fade-in 0.8s var(--ease) both;
+}
+
+/* Staggered cards — each column comes in a touch after the previous */
+.features-grid .feature-card,
+.pricing-grid .pricing-card,
+.steps .step {
+  animation: rise-in 0.6s var(--ease) both;
+}
+
+.features-grid .feature-card:nth-child(1),
+.pricing-grid .pricing-card:nth-child(1),
+.steps .step:nth-child(1) {
+  animation-delay: 0.02s;
+}
+
+.features-grid .feature-card:nth-child(2),
+.pricing-grid .pricing-card:nth-child(2),
+.steps .step:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.features-grid .feature-card:nth-child(3),
+.pricing-grid .pricing-card:nth-child(3),
+.steps .step:nth-child(3) {
+  animation-delay: 0.18s;
+}
+
+.features-grid .feature-card:nth-child(4),
+.steps .step:nth-child(4) {
+  animation-delay: 0.26s;
+}
+
+.features-grid .feature-card:nth-child(5) {
+  animation-delay: 0.34s;
+}
+.features-grid .feature-card:nth-child(6) {
+  animation-delay: 0.42s;
+}
+
+/* ---------- Navbar link underline --------------------------------------- */
+/* A thin line grows from the centre on hover — quiet, precise */
+.nav-links > a {
+  position: relative;
+}
+
+.nav-links > a::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 1px;
+  background-color: var(--accent-strong);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.24s var(--ease);
+}
+
+.nav-links > a:hover::after {
+  transform: scaleX(1);
+}
+
+/* ---------- Button interactions ----------------------------------------- */
+/* Lift + shadow on hover for all buttons */
+.btn {
+  position: relative;
+  overflow: hidden;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    color 0.18s var(--ease),
+    transform 0.18s var(--ease),
+    box-shadow 0.24s var(--ease);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.btn-ghost:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+/* Restore the pressed feel from the base sheet */
+.btn:active {
+  transform: translateY(0);
+}
+
+/* Sheen sweep — only on the solid primary button, only on hover */
+.btn-primary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(255, 255, 255, 0.45),
+    transparent
+  );
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+
+.btn-primary:hover::before {
+  animation: sheen 0.7s var(--ease);
+}
+
+/* Icons inside buttons nudge forward slightly on hover */
+.btn svg {
+  transition: transform 0.2s var(--ease);
+}
+
+.btn:hover svg {
+  transform: translateX(2px);
+}
+
+/* ---------- Feature icon on card hover ---------------------------------- */
+.feature-icon {
+  transition:
+    border-color 0.24s var(--ease),
+    background-color 0.24s var(--ease),
+    transform 0.24s var(--ease);
+}
+
+.feature-card:hover .feature-icon {
+  border-color: var(--text-muted);
+  transform: translateY(-2px);
+}
+
+/* ---------- Step number pulse on hover ---------------------------------- */
+.step-number {
+  transition:
+    color 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+}
+
+.step:hover .step-number {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+/* ---------- Pricing featured card: slight persistent lift --------------- */
+.pricing-card {
+  transition:
+    border-color 0.2s var(--ease),
+    transform 0.24s var(--ease),
+    box-shadow 0.24s var(--ease);
+}
+
+.pricing-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- Logo mark subtle turn on hover ------------------------------ */
+.logo-mark {
+  transition: transform 0.4s var(--ease);
+}
+
+.logo:hover .logo-mark {
+  transform: rotate(8deg) scale(1.05);
+}
+
+/* ---------- Code block caret -------------------------------------------- */
+.code-body::after {
+  content: "_";
+  color: var(--accent-strong);
+  animation: caret-blink 1.2s step-end infinite;
+}
+
+/* ---------- Reduced motion: honour the user's system setting ------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .hero-badge,
+  .hero-title,
+  .hero-subtitle,
+  .hero-buttons,
+  .trust-bar,
+  .feature-card,
+  .pricing-card,
+  .step,
+  .section-header {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
