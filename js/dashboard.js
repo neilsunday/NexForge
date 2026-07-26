@@ -558,6 +558,37 @@ async function confirmRedeem() {
   if (existing.status === "revoked") return showToast("Key revoked", "error");
   if (existing.status === "expired") return showToast("Key expired", "error");
 
+  // Enforce plan/project match: if the key is tied to a project, that project
+  // must have a published script for the key's plan. Admin keys skip this.
+  if (existing.project_id && existing.plan !== "admin") {
+    try {
+      const { data: proj } = await NexaKS.supabase
+        .from("projects")
+        .select("id, name")
+        .eq("id", existing.project_id)
+        .maybeSingle();
+      if (proj) {
+        const { data: matching } = await NexaKS.supabase
+          .from("project_scripts")
+          .select("id")
+          .eq("project_id", proj.id)
+          .eq("plan", existing.plan)
+          .eq("status", "published")
+          .limit(1);
+        if (!matching || matching.length === 0) {
+          return showToast(
+            "This " + existing.plan.toUpperCase() + " key needs a matching " +
+            existing.plan.toUpperCase() + " script in " + proj.name +
+            ". Contact the owner.",
+            "error"
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("Plan match check:", e);
+    }
+  }
+
   const updates = { user_id: currentUser.id, status: "active" };
   if (existing.duration_days && !existing.expires_at) {
     const exp = new Date();
