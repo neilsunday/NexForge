@@ -395,3 +395,134 @@
 
   boot();
 })();
+
+
+/* ============================================================
+ * NexForge - Sidebar Access Control
+ * ------------------------------------------------------------
+ * Add this ONE script tag to dashboard.html (BEFORE </body>):
+ *
+ *   <script src="js/sidebar-guard.js"></script>
+ *
+ * What it does:
+ *   - If user is Discord-only (is_admin: false in DB):
+ *       â†’ Hides Projects, Analytics, Bot Commands links in sidebar
+ *       â†’ Blocks clicks to those pages (redirects back to dashboard)
+ *   - If user is admin (is_admin: true in DB):
+ *       â†’ Shows all sidebar links normally
+ * ============================================================ */
+
+(function () {
+    'use strict';
+
+    // Admin-only link patterns (href includes any of these = admin-only)
+    const ADMIN_LINK_PATTERNS = [
+        'projects.html',
+        'analytics.html',
+        'admin.html'
+    ];
+
+    // Admin-only section names (onclick="showSection('xxx')" = admin-only)
+    const ADMIN_SECTIONS = [
+        'botcommands'
+    ];
+
+    let hasHiddenLinks = false;
+
+    function hideAdminLinks() {
+        if (hasHiddenLinks) return;
+
+        // Hide anchor links matching admin patterns
+        document.querySelectorAll('a').forEach(function (a) {
+            const href = (a.getAttribute('href') || '').toLowerCase();
+            const onclick = (a.getAttribute('onclick') || '').toLowerCase();
+
+            // Skip logo links
+            if (a.classList.contains('logo')) return;
+
+            // Hide by href
+            for (const pattern of ADMIN_LINK_PATTERNS) {
+                if (href.includes(pattern)) {
+                    a.style.display = 'none';
+                    return;
+                }
+            }
+
+            // Hide by onclick showSection
+            for (const section of ADMIN_SECTIONS) {
+                if (onclick.includes("showsection('" + section + "'") ||
+                    onclick.includes('showsection("' + section + '"')) {
+                    a.style.display = 'none';
+                    return;
+                }
+            }
+        });
+
+        hasHiddenLinks = true;
+    }
+
+    function blockAdminClicks() {
+        // Extra layer: intercept any click on admin links (in case dynamically added)
+        document.addEventListener('click', function (e) {
+            const link = e.target.closest('a');
+            if (!link) return;
+
+            const href = (link.getAttribute('href') || '').toLowerCase();
+            for (const pattern of ADMIN_LINK_PATTERNS) {
+                if (href.includes(pattern) && !link.classList.contains('logo')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+            }
+        }, true);
+    }
+
+    async function checkAccess() {
+        // Wait for NexaKS supabase client to be ready
+        for (let i = 0; i < 40 && !window.NexaKS; i++) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+
+        if (!window.NexaKS?.getCurrentUser) {
+            // Supabase not loaded - safest to hide admin links
+            hideAdminLinks();
+            blockAdminClicks();
+            return;
+        }
+
+        try {
+            const user = await window.NexaKS.getCurrentUser();
+            if (!user) {
+                // Not signed in - hide admin links
+                hideAdminLinks();
+                blockAdminClicks();
+                return;
+            }
+
+            const profile = await window.NexaKS.getUserProfile(user.id);
+            const isAdmin = !!profile?.is_admin;
+
+            if (!isAdmin) {
+                // Discord-only user - hide admin sections
+                hideAdminLinks();
+                blockAdminClicks();
+            }
+            // Admin - do nothing, all links visible
+        } catch (e) {
+            // On error, hide admin links to be safe
+            hideAdminLinks();
+            blockAdminClicks();
+        }
+    }
+
+    // Run as soon as DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', checkAccess);
+    } else {
+        checkAccess();
+    }
+
+    // Also run again after 1s in case sidebar renders late
+    setTimeout(checkAccess, 1000);
+})();
