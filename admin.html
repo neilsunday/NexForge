@@ -314,7 +314,23 @@
                 </div>
 
                 <div class="table-wrapper">
-                    <table class="t
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Description</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scriptsTableBody">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Notifications tab (Activity feed) -->
             <div class="card" id="tab-notifications" style="display:none;">
                 <div class="card-header">
@@ -378,22 +394,7 @@
             <!-- Toast container for real-time notifications -->
             <div id="notifToastContainer" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none;max-width:360px;"></div>
 
-        able">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Description</th>
-                                <th>Plan</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="scriptsTableBody">
-                            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        
         </main>
     </div>
 
