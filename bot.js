@@ -618,6 +618,26 @@ async function handleRedeem(interaction, key) {
         return interaction.editReply({ embeds: [embed('Already Claimed', 'This key is bound to another user.', 0xef4444)] });
     }
 
+    // Enforce plan/project match: if the key is tied to a project, that project
+    // must have a published script for the key's plan. Admin keys skip this check
+    // because they grant site-wide access, not a project script.
+    if (existing.project_id && existing.plan !== 'admin') {
+        const { data: proj } = await sb.from('projects')
+            .select('id, name').eq('id', existing.project_id).maybeSingle();
+        if (proj) {
+            const { data: matching } = await sb.from('project_scripts')
+                .select('id').eq('project_id', proj.id)
+                .eq('plan', existing.plan).eq('status', 'published').limit(1);
+            if (!matching || matching.length === 0) {
+                return interaction.editReply({ embeds: [embed('Plan Mismatch',
+                    'This is a **' + existing.plan.toUpperCase() + '** key but project **' + proj.name +
+                    '** has no published **' + existing.plan.toUpperCase() + '** script.\n\n' +
+                    'Ask an admin to publish one, or use a key with a matching plan.',
+                    0xef4444)] });
+            }
+        }
+    }
+
     const updates = { user_id: user.id, status: 'active', redeemed_via: 'discord' };
     if (existing.duration_days && !existing.expires_at) {
         const exp = new Date();
@@ -704,7 +724,13 @@ async function handleGetScript(interaction, projectSlug) {
             return interaction.editReply({ embeds: [embed('No Script Yet',
                 'Project **' + proj.name + '** has no published script.', 0xf59e0b)] });
         }
-        const script = scripts.find(s => s.plan === key.plan) || scripts.find(s => s.plan === 'free') || scripts[0];
+        const script = scripts.find(s => s.plan === key.plan);
+        if (!script) {
+            return interaction.editReply({ embeds: [embed('No Script for Your Plan',
+                'Project **' + proj.name + '** has no published **' + key.plan.toUpperCase() +
+                '** script yet.\n\nAsk an admin to publish one for your plan.',
+                0xf59e0b)] });
+        }
 
         const base = SITE_URL + '/api/load/' + proj.slug + (script.load_id ? '?script=' + script.load_id : '');
         let loader;
@@ -738,7 +764,13 @@ async function handleGetScript(interaction, projectSlug) {
     if (!scripts || scripts.length === 0) {
         return interaction.editReply({ embeds: [embed('No Script Yet', 'Project **' + project.name + '** has no published script.', 0xf59e0b)] });
     }
-    const script = scripts.find(s => s.plan === key.plan) || scripts.find(s => s.plan === 'free') || scripts[0];
+    const script = scripts.find(s => s.plan === key.plan);
+    if (!script) {
+        return interaction.editReply({ embeds: [embed('No Script for Your Plan',
+            'Project **' + project.name + '** has no published **' + key.plan.toUpperCase() +
+            '** script yet.\n\nAsk an admin to publish one for your plan.',
+            0xf59e0b)] });
+    }
 
     const base = SITE_URL + '/api/load/' + project.slug + (script.load_id ? '?script=' + script.load_id : '');
     let loader;
