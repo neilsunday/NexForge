@@ -640,25 +640,13 @@ async function generateKeys() {
 
   if (qty < 1 || qty > 500) return showToast("Quantity must be 1-500", "error");
 
-  // Warn admin when generating admin-plan keys (grant full site access)
+  // Admin-plan minting is forbidden through the web panel. Server enforces this too.
   if (plan === "admin") {
-    if (!confirm("Generate " + qty + " ADMIN key(s)?\n\nThese keys grant full admin access to the website when redeemed. Only issue them to trusted staff.")) {
-      return;
-    }
+    return showToast("Admin keys cannot be generated from the panel. Contact the site owner.", "error");
   }
 
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Generating...";
-  }
-  showToast(
-    "Generating " + qty + " " + plan.toUpperCase() + " keys...",
-    "info",
-  );
-
-  // If a project is selected, warn when no matching published script exists.
-  // Admin keys skip this check (they don't need a project script).
-  if (projectId && plan !== "admin") {
+  // Warn on project + plan mismatch (soft check for UX - server does not enforce this)
+  if (projectId) {
     try {
       const { data: matching } = await NexaKS.supabase
         .from("project_scripts")
@@ -680,52 +668,42 @@ async function generateKeys() {
     }
   }
 
+  // The admin key session is required (server verifies it).
+  let sessionAdmin = null;
   try {
-    // Make sure the admin has a users row (needed for keys.created_by FK)
-    const adminId = await resolveAdminUserId();
+    const raw = localStorage.getItem("nexaks_session");
+    if (raw) sessionAdmin = JSON.parse(raw);
+  } catch (_) {}
+  if (!sessionAdmin || !sessionAdmin.key) {
+    return showToast("Your admin session is missing. Please log in again.", "error");
+  }
 
-    // Generate unique key strings " retry on in-batch collisions
-    const keySet = new Set();
-    let attempts = 0;
-    while (keySet.size < qty && attempts < qty * 10) {
-      keySet.add(generateKeyString());
-      attempts++;
-    }
-    if (keySet.size < qty) {
-      throw new Error("Could not generate " + qty + " unique keys");
-    }
-    const keys = Array.from(keySet);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Generating...";
+  }
+  showToast("Generating " + qty + " " + plan.toUpperCase() + " keys...", "info");
 
-    const rows = keys.map((key) => ({
-      key: key,
-      plan: plan,
-      duration_days: duration === "lifetime" ? null : parseInt(duration),
-      hwid_reset_limit: resets,
-      status: "unclaimed",
-      created_by: adminId,
-      project_id: projectId || null,
-    }));
-
-    const { error } = await NexaKS.supabase.from("keys").insert(rows);
-    if (error) {
-      // Surface the real reason (FK violation, unique collision, RLS, etc.)
-      const detail = error.message + (error.details ? " (" + error.details + ")" : "");
-      throw new Error(detail);
-    }
-
-    // Log it
-    await NexaKS.supabase.from("logs").insert({
-      user_id: adminId,
-      action: "admin_generate",
-      status: "success",
-      metadata: {
-        message: "Generated " + qty + " " + plan + " keys (" + duration + ")" +
-                 (projectId ? " for project " + projectId : ""),
-      },
+  try {
+    const res = await fetch("/api/admin/generate-keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admin_key: sessionAdmin.key,
+        plan: plan,
+        duration: duration,
+        quantity: qty,
+        hwid_reset_limit: resets,
+        project_id: projectId || null
+      })
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Generation failed");
+    }
 
-    showToast("Successfully generated " + qty + " keys!", "success");
-    downloadKeysFile(keys, plan, duration);
+    showToast("Successfully generated " + data.count + " keys!", "success");
+    downloadKeysFile(data.keys, plan, duration);
     await loadKeys();
     await loadStats();
     await loadLogs();
@@ -1579,7 +1557,7 @@ function showNotifToast(title, username, message) {
   titleEl.textContent = title;
   const bodyEl = document.createElement("div");
   bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
-  bodyEl.textContent = username + (message ? " ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â " + message : "");
+  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â " + message : "");
   toast.appendChild(titleEl);
   toast.appendChild(bodyEl);
   container.appendChild(toast);
