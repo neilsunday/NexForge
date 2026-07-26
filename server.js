@@ -153,6 +153,133 @@ app.post('/api/verify-turnstile', loginRateLimit, async (req, res) => {
 });
 
 // ========================================
+// /api/verify-admin-key - Admin key login verification
+// Called by the Admin Access modal on index.html / any admin page.
+// Uses the service key so it can bypass RLS on the `keys` table.
+// Flow: verify Turnstile -> look up key -> validate -> return session payload.
+// ========================================
+app.post('/api/verify-admin-key', loginRateLimit, async (req, res) => {
+    try {
+        const key = (req.body && req.body.key) ? String(req.body.key).trim().toUpperCase() : '';
+        const token = (req.body && req.body.token) ? String(req.body.token) : '';
+
+        if (!key) {
+            return res.status(400).json({ success: false, error: 'Missing admin key' });
+        }
+        if (!/^NXKS-[A-Z0-9-]{19}$/.test(key)) {
+            return res.status(400).json({ success: false, error: 'Invalid key format' });
+        }
+        if (!token) {
+            return res.status(400).json({ success: false, error: 'Missing captcha token' });
+        }
+        if (!sb) {
+            return res.status(500).json({ success: false, error: 'Server not configured' });
+        }
+
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+
+        // 1. Verify the Turnstile token first
+        if (!TURNSTILE_SECRET_KEY) {
+            return res.status(500).json({ success: false, error: 'Captcha not configured on server' });
+        }
+        const params = new URLSearchParams();
+        params.append('secret', TURNSTILE_SECRET_KEY);
+        params.append('response', token);
+        if (clientIp && clientIp !== 'unknown') params.append('remoteip', clientIp);
+
+        const cfRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+            method: 'POST', body: params
+        });
+        const cfData = await cfRes.json();
+        if (!cfData.success) {
+            return res.status(400).json({ success: false, error: 'Captcha verification failed' });
+        }
+
+        // 2. Look up the key (service role bypasses RLS)
+        const { data: keyRow, error } = await sb
+            .from('keys')
+            .select('key, plan, status, expires_at, user_id, users:user_id(id, username, is_banned)')
+            .eq('key', key)
+            .maybeSingle();
+
+        if (error) {
+            console.error('Admin key lookup error:', error);
+            return res.status(500).json({ success: false, error: 'Database error' });
+        }
+
+        // 3. Validate (generic message for lookup failures to avoid key enumeration)
+        if (!keyRow)                     return res.status(401).json({ success: false, error: 'Key not found or invalid.' });
+        if (keyRow.plan !== 'admin')     return res.status(401).json({ success: false, error: 'Key not found or invalid.' });
+        if (keyRow.status === 'revoked') return res.status(401).json({ success: false, error: 'This admin key has been revoked.' });
+        if (keyRow.status === 'expired') return res.status(401).json({ success: false, error: 'This admin key has expired.' });
+        if (keyRow.status !== 'active')  return res.status(401).json({ success: false, error: 'This admin key is not active.' });
+        if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
+            await sb.from('keys').update({ status: 'expired' }).eq('key', key);
+            return res.status(401).json({ success: false, error: 'This admin key has expired.' });
+        }
+        if (keyRow.users?.is_banned) {
+            return res.status(401).json({ success: false, error: 'The account tied to this key is banned.' });
+        }
+
+        // 4. Audit log (fire-and-forget)
+        sb.from('logs').insert({
+            user_id: keyRow.user_id,
+            key: keyRow.key,
+            action: 'admin_login',
+            status: 'success',
+            metadata: { message: 'Admin key login via web modal', ip: clientIp }
+        }).then(() => {}, () => {});
+
+        // 5. Return session payload (only the fields the client needs)
+        return res.json({
+            success: true,
+            session: {
+                key: keyRow.key,
+                plan: keyRow.plan,
+                user_id: keyRow.user_id,
+                username: keyRow.users?.username || 'Admin',
+                expires_at: keyRow.expires_at || null
+            }
+        });
+    } catch (err) {
+        console.error('Admin key verify error:', err);
+        return res.status(500).json({ success: false, error: 'Server error verifying key' });
+    }
+});
+
+// ========================================
+// /api/verify-admin-key-refresh - Silent re-verify (no captcha)
+// Called by gate.js on every admin page load to catch revoked/expired sessions.
+// Same validation as /api/verify-admin-key minus Turnstile.
+// ========================================
+app.post('/api/verify-admin-key-refresh', loginRateLimit, async (req, res) => {
+    try {
+        const key = (req.body && req.body.key) ? String(req.body.key).trim().toUpperCase() : '';
+        if (!key || !/^NXKS-[A-Z0-9-]{19}$/.test(key)) {
+            return res.status(400).json({ success: false, error: 'Invalid key' });
+        }
+        if (!sb) return res.status(500).json({ success: false, error: 'Server not configured' });
+
+        const { data: keyRow, error } = await sb
+            .from('keys')
+            .select('key, plan, status, expires_at, users:user_id(is_banned)')
+            .eq('key', key)
+            .maybeSingle();
+
+        if (error || !keyRow) return res.status(401).json({ success: false });
+        if (keyRow.plan !== 'admin') return res.status(401).json({ success: false });
+        if (keyRow.status !== 'active') return res.status(401).json({ success: false });
+        if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) return res.status(401).json({ success: false });
+        if (keyRow.users?.is_banned) return res.status(401).json({ success: false });
+
+        return res.json({ success: true });
+    } catch (err) {
+        console.error('Admin key refresh error:', err);
+        return res.status(500).json({ success: false });
+    }
+});
+
+// ========================================
 // /api/verify - MAIN LUA LOADER ENDPOINT
 // Called by Lua script with: ?license=NXKS-...&hwid=abc123
 // Returns: script payload (plain text) if authorized, error message if not
@@ -321,7 +448,7 @@ app.get('/api/verify', rateLimit, async (req, res) => {
         // whose plan exactly matches key.plan. No cross-plan fallback.
         let scriptContent = null;
         if (project) {
-            // Direct query, exact plan, published only â€” safer than the RPC's fallback logic.
+            // Direct query, exact plan, published only - safer than the RPC's fallback logic.
             const { data: projScripts } = await sb.from('project_scripts')
                 .select('script_content, id, execution_count')
                 .eq('project_id', project.id)
@@ -349,7 +476,7 @@ app.get('/api/verify', rateLimit, async (req, res) => {
             await logProject(project.id, key.user_id, licenseUpper, 'verify', 'success',
                 'Script served (' + key.plan + ')', clientIp);
         } else {
-            // No project bound â€” fall back to plan-level global script.
+            // No project bound - fall back to plan-level global script.
             scriptContent = await fetchScriptForKey(key);
         }
         const finalPayload = scriptContent || fallbackPayload(key);
