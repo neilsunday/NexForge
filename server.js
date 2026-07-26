@@ -316,15 +316,40 @@ app.get('/api/verify', rateLimit, async (req, res) => {
                 'Script executed', clientIp);
         }
 
-        // AUTHORIZED - return the actual script payload
-        // Prefer the project's published script; fall back to the plan-level script.
+        // AUTHORIZED - return the actual script payload.
+        // Strict plan match: if the key is tied to a project, only serve a script
+        // whose plan exactly matches key.plan. No cross-plan fallback.
         let scriptContent = null;
         if (project) {
-            scriptContent = await fetchProjectScript(project.id, key.plan);
+            // Direct query, exact plan, published only â€” safer than the RPC's fallback logic.
+            const { data: projScripts } = await sb.from('project_scripts')
+                .select('script_content, id, execution_count')
+                .eq('project_id', project.id)
+                .eq('plan', key.plan)
+                .eq('status', 'published')
+                .order('updated_at', { ascending: false })
+                .limit(1);
+            const projScript = (projScripts && projScripts[0]) || null;
+
+            if (!projScript) {
+                await logProject(project.id, key.user_id, licenseUpper, 'verify_fail', 'warning',
+                    'No published ' + key.plan + ' script for project', clientIp);
+                return res.status(200).type('text/plain').send(
+                    'error("NexaKS: No published ' + key.plan.toUpperCase() +
+                    ' script for project ' + project.name + '. Contact the owner.")'
+                );
+            }
+
+            scriptContent = projScript.script_content;
+            // Increment counter (fire and forget)
+            sb.from('project_scripts').update({
+                execution_count: (projScript.execution_count || 0) + 1
+            }).eq('id', projScript.id).then(() => {}, () => {});
+
             await logProject(project.id, key.user_id, licenseUpper, 'verify', 'success',
-                'Script served', clientIp);
-        }
-        if (!scriptContent) {
+                'Script served (' + key.plan + ')', clientIp);
+        } else {
+            // No project bound â€” fall back to plan-level global script.
             scriptContent = await fetchScriptForKey(key);
         }
         const finalPayload = scriptContent || fallbackPayload(key);
@@ -497,6 +522,17 @@ app.get('/api/load/:slug', rateLimit, async (req, res) => {
         }
         if (keyRow.project_id && keyRow.project_id !== script.project_id) {
             return res.status(200).type('text/plain').send('error("NexaKS: Key not valid for this project")');
+        }
+        // Strict plan match: the requested script's plan must equal the key's plan.
+        // Admin keys bypass this (they carry site-wide access, not a specific script tier).
+        if (keyRow.plan !== 'admin' && script.plan && script.plan !== keyRow.plan) {
+            await logProject(script.project_id, keyRow.user_id, key, 'load_fail', 'warning',
+                'Plan mismatch: key=' + keyRow.plan + ', script=' + script.plan, clientIp);
+            return res.status(200).type('text/plain').send(
+                'error("NexaKS: This is a ' + keyRow.plan.toUpperCase() +
+                ' key but this script is for ' + String(script.plan).toUpperCase() +
+                '. Use the correct loader for your plan.")'
+            );
         }
 
         // Check expiration (auto-mark expired if past deadline)
