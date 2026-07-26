@@ -637,15 +637,34 @@ async function generateKeys() {
     }
     const keys = Array.from(keySet);
 
-    const rows = keys.map((key) => ({
-      key: key,
-      plan: plan,
-      duration_days: duration === "lifetime" ? null : parseInt(duration),
-      hwid_reset_limit: resets,
-      status: "unclaimed",
-      created_by: adminId,
-      project_id: projectId || null,
-    }));
+    // Admin-plan keys are auto-activated so the owner can log in immediately
+    // via the /admin key modal (no Discord redeem step needed).
+    // All other plans stay "unclaimed" until redeemed via /redeem on Discord.
+    const isAdminPlan = plan === "admin";
+    const durationDays = duration === "lifetime" ? null : parseInt(duration);
+
+    const rows = keys.map((key) => {
+      const row = {
+        key: key,
+        plan: plan,
+        duration_days: durationDays,
+        hwid_reset_limit: resets,
+        status: isAdminPlan ? "active" : "unclaimed",
+        created_by: adminId,
+        project_id: projectId || null,
+      };
+      // For admin keys, start the clock immediately + bind to the creator
+      if (isAdminPlan) {
+        row.user_id = adminId;
+        row.redeemed_via = "admin_panel";
+        if (durationDays) {
+          const exp = new Date();
+          exp.setDate(exp.getDate() + durationDays);
+          row.expires_at = exp.toISOString();
+        }
+      }
+      return row;
+    });
 
     const { error } = await NexaKS.supabase.from("keys").insert(rows);
     if (error) {
@@ -1520,7 +1539,7 @@ function showNotifToast(title, username, message) {
   titleEl.textContent = title;
   const bodyEl = document.createElement("div");
   bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
-  bodyEl.textContent = username + (message ? " Ã¢â‚¬â€ " + message : "");
+  bodyEl.textContent = username + (message ? " ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â " + message : "");
   toast.appendChild(titleEl);
   toast.appendChild(bodyEl);
   container.appendChild(toast);
