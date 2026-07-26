@@ -212,13 +212,40 @@ app.post('/api/verify-admin-key', loginRateLimit, async (req, res) => {
         if (keyRow.plan !== 'admin')     return res.status(401).json({ success: false, error: 'Key not found or invalid.' });
         if (keyRow.status === 'revoked') return res.status(401).json({ success: false, error: 'This admin key has been revoked.' });
         if (keyRow.status === 'expired') return res.status(401).json({ success: false, error: 'This admin key has expired.' });
-        if (keyRow.status !== 'active')  return res.status(401).json({ success: false, error: 'This admin key is not active.' });
+        // 'active' and 'unclaimed' are both allowed here.
+        // Unclaimed admin keys become active + get bound to the redeemer on first login.
+        if (keyRow.status !== 'active' && keyRow.status !== 'unclaimed') {
+            return res.status(401).json({ success: false, error: 'This admin key is not usable.' });
+        }
         if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
             await sb.from('keys').update({ status: 'expired' }).eq('key', key);
             return res.status(401).json({ success: false, error: 'This admin key has expired.' });
         }
         if (keyRow.users?.is_banned) {
             return res.status(401).json({ success: false, error: 'The account tied to this key is banned.' });
+        }
+
+        // ---- First-use activation for unclaimed admin keys ----
+        // The web modal can't bind to a specific user (there's no OAuth session yet),
+        // so we leave user_id as-is but flip status -> active and set expires_at.
+        // The Discord bot's /redeem flow is the way to bind an admin key to a Discord user.
+        if (keyRow.status === 'unclaimed') {
+            const update = { status: 'active' };
+            // Compute expires_at from duration_days if not already set
+            if (!keyRow.expires_at) {
+                // Fetch duration_days to compute expiry (we didn't select it above)
+                const { data: durRow } = await sb.from('keys')
+                    .select('duration_days').eq('key', key).maybeSingle();
+                const d = durRow?.duration_days;
+                if (d && Number.isFinite(+d)) {
+                    const exp = new Date();
+                    exp.setDate(exp.getDate() + parseInt(d, 10));
+                    update.expires_at = exp.toISOString();
+                    keyRow.expires_at = update.expires_at;
+                }
+            }
+            await sb.from('keys').update(update).eq('key', key);
+            keyRow.status = 'active';
         }
 
         // 4. Audit log (fire-and-forget)
