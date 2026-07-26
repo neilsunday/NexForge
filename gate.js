@@ -4,7 +4,7 @@
  * It enforces:
  *   - No session at all           -> redirect to /login.html
  *   - Discord OAuth session only  -> allow dashboard only, hide/block admin nav
- *   - Admin key session           -> full access
+ *   - Admin key session           -> full access (re-verified against DB)
  *
  * Set window.NEXAKS_PAGE = "dashboard" | "admin" | "projects" | "analytics"
  * BEFORE loading this script (or add data-page="..." to <body>).
@@ -15,6 +15,12 @@
 
   const SESSION_KEY = "nexaks_session";
   const PAGE = (window.NEXAKS_PAGE || document.body?.dataset?.page || guessPage()).toLowerCase();
+
+  // Cloudflare Turnstile SITE key (public â€” safe to expose).
+  // Replace with your own site key. Falls back to Cloudflare's test key so
+  // dev environments still work while you set this up.
+  const TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
+    "0x4AAAAAAB0000000000000000"; // TODO: replace with your real site key
 
   // Pages that require admin key. Dashboard is user-level and needs any valid login.
   const ADMIN_PAGES = ["admin", "projects", "analytics"];
@@ -52,6 +58,59 @@
     window.location.replace(url);
   }
 
+  // Re-verify an admin_key session against the DB so localStorage tampering
+  // cannot grant admin access. Returns true if the key is still a valid,
+  // active admin key. Returns false and clears the session otherwise.
+  async function reverifyAdminSession(session) {
+    if (!session || !session.key) return false;
+    if (!window.NexaKS?.supabase) return false;
+    try {
+      const { data: keyRow, error } = await NexaKS.supabase
+        .from("keys")
+        .select("key, plan, status, expires_at, users:user_id(is_banned)")
+        .eq("key", session.key).maybeSingle();
+      if (error || !keyRow) return false;
+      if (keyRow.plan !== "admin") return false;
+      if (keyRow.status !== "active") return false;
+      if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) return false;
+      if (keyRow.users?.is_banned) return false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Verify a Turnstile token with our server. Returns true if valid.
+  async function verifyTurnstileToken(token) {
+    try {
+      const res = await fetch("/api/verify-turnstile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token })
+      });
+      const data = await res.json();
+      return !!data.success;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Load the Turnstile script once, on demand.
+  function loadTurnstileScript() {
+    if (window.turnstile) return Promise.resolve();
+    if (window._nexaksTurnstileLoading) return window._nexaksTurnstileLoading;
+    window._nexaksTurnstileLoading = new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      s.async = true;
+      s.defer = true;
+      s.onload = () => resolve();
+      s.onerror = () => resolve(); // resolve either way; verify will just fail
+      document.head.appendChild(s);
+    });
+    return window._nexaksTurnstileLoading;
+  }
+
   function showKeyPrompt(reason) {
     // Full-screen modal asking for admin key (used when a non-admin tries admin nav)
     const existing = document.getElementById("nexaks-key-prompt");
@@ -67,6 +126,7 @@
         '<div id="nexaks-prompt-err" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:12px;"></div>' +
         '<input id="nexaks-prompt-input" type="text" placeholder="NXKS-XXXX-XXXX-XXXX-XXXX" maxlength="24" ' +
           'style="width:100%;box-sizing:border-box;padding:12px 14px;background:#0f0f11;border:1px solid #3a3a3f;border-radius:8px;color:#fff;font-family:\'JetBrains Mono\',monospace;font-size:14px;text-transform:uppercase;margin-bottom:14px;">' +
+        '<div id="nexaks-prompt-turnstile" style="display:flex;justify-content:center;margin-bottom:14px;min-height:65px;"></div>' +
         '<div style="display:flex;gap:10px;">' +
           '<button id="nexaks-prompt-cancel" style="flex:1;padding:12px;background:transparent;border:1px solid #3a3a3f;border-radius:8px;color:#9ca3af;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button>' +
           '<button id="nexaks-prompt-submit" style="flex:2;padding:12px;background:linear-gradient(135deg,#7c3aed,#ec4899);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-family:inherit;">Verify</button>' +
@@ -78,6 +138,26 @@
     const err = document.getElementById("nexaks-prompt-err");
     const submit = document.getElementById("nexaks-prompt-submit");
     const cancel = document.getElementById("nexaks-prompt-cancel");
+    const turnstileBox = document.getElementById("nexaks-prompt-turnstile");
+
+    // Render Turnstile widget (async â€” safe to submit once user has a token)
+    let turnstileToken = null;
+    let turnstileWidgetId = null;
+    loadTurnstileScript().then(() => {
+      if (window.turnstile && turnstileBox) {
+        try {
+          turnstileWidgetId = window.turnstile.render(turnstileBox, {
+            sitekey: TURNSTILE_SITE_KEY,
+            theme: "dark",
+            callback: (token) => { turnstileToken = token; },
+            "expired-callback": () => { turnstileToken = null; },
+            "error-callback": () => { turnstileToken = null; }
+          });
+        } catch (e) {
+          console.warn("Turnstile render failed:", e);
+        }
+      }
+    });
 
     input.focus();
     input.addEventListener("input", (e) => {
@@ -99,13 +179,23 @@
         err.style.display = "block";
         return;
       }
+      if (!turnstileToken) {
+        err.textContent = "Please complete the captcha first.";
+        err.style.display = "block";
+        return;
+      }
       submit.disabled = true;
       submit.textContent = "Verifying...";
 
       try {
+        // 1. Verify the captcha with the server FIRST.
+        const captchaOk = await verifyTurnstileToken(turnstileToken);
+        if (!captchaOk) throw new Error("Captcha verification failed. Please try again.");
+
         if (!window.NexaKS?.supabase) {
           throw new Error("Supabase client not loaded on this page.");
         }
+        // 2. Look up the key.
         const { data: keyRow, error } = await NexaKS.supabase
           .from("keys")
           .select("key, plan, status, expires_at, user_id, users:user_id(id, username, is_banned)")
@@ -140,6 +230,9 @@
         err.style.display = "block";
         submit.disabled = false;
         submit.textContent = "Verify";
+        // Reset the captcha so the user gets a fresh token
+        try { window.turnstile && turnstileWidgetId != null && window.turnstile.reset(turnstileWidgetId); } catch (_) {}
+        turnstileToken = null;
       }
     });
   }
@@ -215,7 +308,7 @@
       });
       localStorage.setItem(SESSION_KEY, JSON.stringify(merged));
       localStorage.removeItem("nexaks_pending_discord");
-      applyGate(merged);
+      await guardAndApply(merged);
       return;
     }
 
@@ -225,7 +318,44 @@
       return;
     }
 
-    applyGate(localSession);
+    await guardAndApply(localSession);
+  }
+
+  // Wrap applyGate with a DB re-verification step for admin sessions.
+  // If a client tampered with localStorage to grant themselves is_admin,
+  // the DB check will catch it and demote the session.
+  async function guardAndApply(session) {
+    const claimsAdmin = !!session.is_admin;
+    const usedAdminKey = session.login_method &&
+      (session.login_method === "admin_key" || session.login_method.includes("admin_key"));
+
+    if (claimsAdmin && usedAdminKey) {
+      const ok = await reverifyAdminSession(session);
+      if (!ok) {
+        // Demote â€” the key is gone, revoked, expired, or the plan is not admin.
+        // Keep any Discord identity but strip admin flags.
+        const demoted = Object.assign({}, session, {
+          is_admin: false,
+          plan: session.login_method === "admin_key" ? undefined : session.plan,
+          login_method: session.login_method === "admin_key" ? "discord" : "discord",
+          key: undefined
+        });
+        if (demoted.user_id) {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(demoted));
+        } else {
+          clearSession();
+        }
+        // If the current page needs admin, prompt again with fresh Turnstile.
+        if (ADMIN_PAGES.includes(PAGE)) {
+          showKeyPrompt("Your admin session is no longer valid. Enter your admin key again.");
+          return;
+        }
+        applyGate(demoted);
+        return;
+      }
+    }
+
+    applyGate(session);
   }
 
   function applyGate(session) {
