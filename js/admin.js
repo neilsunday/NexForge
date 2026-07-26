@@ -590,6 +590,30 @@ async function generateKeys() {
     "info",
   );
 
+  // If a project is selected, warn when no matching published script exists.
+  // Admin keys skip this check (they don't need a project script).
+  if (projectId && plan !== "admin") {
+    try {
+      const { data: matching } = await NexaKS.supabase
+        .from("project_scripts")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("plan", plan)
+        .eq("status", "published")
+        .limit(1);
+      if (!matching || matching.length === 0) {
+        if (!confirm(
+          "Warning: the selected project has no published " + plan.toUpperCase() +
+          " script yet.\n\nUsers who redeem this key will be BLOCKED at redeem and cannot get any script until you publish one for this plan.\n\nContinue anyway?"
+        )) {
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Plan-vs-project check:", e);
+    }
+  }
+
   try {
     // Make sure the admin has a users row (needed for keys.created_by FK)
     const adminId = await resolveAdminUserId();
