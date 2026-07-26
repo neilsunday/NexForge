@@ -1,4 +1,4 @@
-/* NexaKS - Access Gate
+/* NexaKS - Access Gate v2 (fixed boot flow)
  *
  * Drop this into every protected page BEFORE any other JS.
  * It enforces:
@@ -16,12 +16,12 @@
   const SESSION_KEY = "nexaks_session";
   const PAGE = (window.NEXAKS_PAGE || document.body?.dataset?.page || guessPage()).toLowerCase();
 
-  // Cloudflare Turnstile SITE key (public - safe to expose).
   const TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
     "0x4AAAAAAD-YvdvOI_vA3JJt";
 
-  // Pages that require admin privileges (either owner or admin-key session).
   const ADMIN_PAGES = ["admin", "projects", "analytics"];
+  const ADMIN_ONLY_HREF_PATTERNS = ["projects.html", "analytics.html", "admin.html"];
+  const ADMIN_ONLY_SECTIONS      = ["botcommands"];
 
   function guessPage() {
     const path = window.location.pathname.toLowerCase();
@@ -172,8 +172,6 @@
         localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 
         overlay.remove();
-        // Admin-key users land on the dashboard (they have full-site freedom
-        // from there via the sidebar). This unifies the entry point.
         window.location.href = "/dashboard.html";
       } catch (ex) {
         err.textContent = ex.message || "Verification failed.";
@@ -187,57 +185,32 @@
   }
 
   // ---------- SIDEBAR VISIBILITY ----------
-  // Roles:
-  //   OWNER          = Discord OAuth AND is_admin=true in DB
-  //   ADMIN_KEY      = logged in through /api/verify-admin-key
-  //   REGULAR        = Discord OAuth AND is_admin=false (or no admin session at all)
-  //
-  // OWNER  + ADMIN_KEY  =>  show every nav item, including the "Admin Panel" link
-  // REGULAR            =>  hide Projects, Bot Commands, Analytics, Admin Panel
 
-  const ADMIN_ONLY_HREF_PATTERNS = ["projects.html", "analytics.html", "admin.html"];
-  const ADMIN_ONLY_SECTIONS      = ["botcommands"];
+  function isAdminNavItem(a) {
+    if (!a || a.classList.contains("logo")) return false;
+    const href = (a.getAttribute("href") || "").toLowerCase();
+    const onclick = (a.getAttribute("onclick") || "").toLowerCase();
+    for (const pat of ADMIN_ONLY_HREF_PATTERNS) if (href.includes(pat)) return true;
+    for (const sec of ADMIN_ONLY_SECTIONS) {
+      if (onclick.includes("showsection('" + sec + "'") ||
+          onclick.includes('showsection("' + sec + '"')) return true;
+    }
+    return false;
+  }
 
   function hideAdminNav() {
-    document.querySelectorAll("a").forEach(function (a) {
-      if (a.classList.contains("logo")) return;
-      const href = (a.getAttribute("href") || "").toLowerCase();
-      const onclick = (a.getAttribute("onclick") || "").toLowerCase();
-
-      for (const pat of ADMIN_ONLY_HREF_PATTERNS) {
-        if (href.includes(pat)) { a.style.display = "none"; return; }
-      }
-      for (const sec of ADMIN_ONLY_SECTIONS) {
-        if (onclick.includes("showsection('" + sec + "'") ||
-            onclick.includes('showsection("' + sec + '"')) {
-          a.style.display = "none";
-          return;
-        }
-      }
+    document.querySelectorAll("a").forEach((a) => {
+      if (isAdminNavItem(a)) a.style.display = "none";
     });
+    // The Admin Panel link has id="adminLink"; make sure it's hidden too
+    const adminLink = document.getElementById("adminLink");
+    if (adminLink) adminLink.style.display = "none";
   }
 
   function showAdminNav() {
-    // Unhide anything that was hidden AND make the "Admin Panel" link functional.
-    document.querySelectorAll("a").forEach(function (a) {
-      if (a.classList.contains("logo")) return;
-      const href = (a.getAttribute("href") || "").toLowerCase();
-      const onclick = (a.getAttribute("onclick") || "").toLowerCase();
-      let isAdminItem = false;
-      for (const pat of ADMIN_ONLY_HREF_PATTERNS) if (href.includes(pat)) { isAdminItem = true; break; }
-      if (!isAdminItem) {
-        for (const sec of ADMIN_ONLY_SECTIONS) {
-          if (onclick.includes("showsection('" + sec + "'") ||
-              onclick.includes('showsection("' + sec + '"')) {
-            isAdminItem = true; break;
-          }
-        }
-      }
-      if (isAdminItem) a.style.display = "";
+    document.querySelectorAll("a").forEach((a) => {
+      if (isAdminNavItem(a)) a.style.display = "";
     });
-
-    // "Admin Panel" link on the dashboard is a plain anchor with id="adminLink"
-    // and no href. Point it at admin.html so it actually navigates.
     const adminLink = document.getElementById("adminLink");
     if (adminLink) {
       adminLink.href = "admin.html";
@@ -248,97 +221,105 @@
   function blockAdminNavClicks() {
     document.addEventListener("click", function (e) {
       const link = e.target.closest("a");
-      if (!link || link.classList.contains("logo")) return;
-      const href = (link.getAttribute("href") || "").toLowerCase();
-      const onclick = (link.getAttribute("onclick") || "").toLowerCase();
-
-      let isAdminItem = false;
-      for (const pat of ADMIN_ONLY_HREF_PATTERNS) if (href.includes(pat)) { isAdminItem = true; break; }
-      if (!isAdminItem) {
-        for (const sec of ADMIN_ONLY_SECTIONS) {
-          if (onclick.includes("showsection('" + sec + "'") ||
-              onclick.includes('showsection("' + sec + '"')) {
-            isAdminItem = true; break;
-          }
-        }
-      }
-      if (!isAdminItem) return;
-
+      if (!isAdminNavItem(link)) return;
       e.preventDefault();
       e.stopPropagation();
-      // Regular users get the admin-key prompt so they can escalate on the spot.
       showKeyPrompt("This page requires an admin key. Enter it below to unlock.");
     }, true);
   }
 
-  // ---------- MAIN GATE LOGIC ----------
+  // ---------- MAIN GATE LOGIC (rewritten for reliability) ----------
 
-  async function detectDiscordSession() {
-    if (!window.NexaKS?.getCurrentUser) return null;
-    try {
-      const user = await window.NexaKS.getCurrentUser();
-      return user || null;
-    } catch (_) { return null; }
+  // Wait up to ~5s for the Supabase client wrapper to be available.
+  async function waitForNexaKS() {
+    for (let i = 0; i < 50; i++) {
+      if (window.NexaKS?.getCurrentUser) return true;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return false;
+  }
+
+  // Try to get the Discord OAuth user, retrying briefly since supabase.js
+  // may still be settling the session from the URL hash.
+  async function getDiscordUserResilient() {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const user = await window.NexaKS.getCurrentUser();
+        if (user) return user;
+      } catch (_) {}
+      await new Promise(r => setTimeout(r, 400));
+    }
+    return null;
   }
 
   async function boot() {
-    for (let i = 0; i < 20 && !window.NexaKS; i++) {
-      await new Promise(r => setTimeout(r, 100));
+    const nexaReady = await waitForNexaKS();
+
+    // ---- Step 1: read whatever's in localStorage ----
+    let session = readSession();
+
+    // ---- Step 2: fold in Discord OAuth if there's an active one ----
+    if (nexaReady) {
+      const discordUser = await getDiscordUserResilient();
+      if (discordUser) {
+        // Fetch profile for is_admin flag
+        let isAdmin = false;
+        let username = discordUser.user_metadata?.full_name ||
+                       discordUser.user_metadata?.name || "User";
+        try {
+          const profile = await window.NexaKS.getUserProfile(discordUser.id);
+          if (profile) {
+            isAdmin = !!profile.is_admin;
+            if (profile.username) username = profile.username;
+          }
+        } catch (_) {}
+
+        // Merge into or create the session. Existing admin-key claims survive.
+        const wasAdminKey = session?.login_method &&
+          String(session.login_method).includes("admin_key");
+
+        session = Object.assign({}, session || {}, {
+          user_id: discordUser.id,
+          username: username,
+          // is_admin becomes true if EITHER the DB profile says so OR the user
+          // already redeemed an admin key in this session.
+          is_admin: isAdmin || !!(wasAdminKey && session.is_admin),
+          login_method: wasAdminKey ? "discord+admin_key" : "discord",
+          expires_at: Date.now() + 7 * 24 * 3600 * 1000
+        });
+        try {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        } catch (_) {}
+        localStorage.removeItem("nexaks_pending_discord");
+      }
     }
 
-    const localSession = readSession();
-    const discordUser = await detectDiscordSession();
-
-    if (discordUser && (!localSession || (localSession.login_method === "admin_key" && !localSession.user_id))) {
-      let isAdmin = false;
-      let username = "User";
-      try {
-        const profile = await window.NexaKS.getUserProfile(discordUser.id);
-        isAdmin = !!profile?.is_admin;
-        username = profile?.username || discordUser.user_metadata?.full_name || "User";
-      } catch (_) {}
-
-      const merged = Object.assign({}, localSession || {}, {
-        user_id: discordUser.id,
-        username: username,
-        is_admin: localSession?.is_admin || isAdmin,
-        login_method: localSession?.login_method === "admin_key" ? "discord+admin_key" : "discord",
-        expires_at: Date.now() + 7 * 24 * 3600 * 1000
-      });
-      localStorage.setItem(SESSION_KEY, JSON.stringify(merged));
-      localStorage.removeItem("nexaks_pending_discord");
-      await guardAndApply(merged);
-      return;
-    }
-
-    if (!localSession) {
+    // ---- Step 3: no session at all => login page ----
+    if (!session) {
       redirect("/login.html");
       return;
     }
 
-    await guardAndApply(localSession);
+    // ---- Step 4: reverify admin-key sessions against the server ----
+    await guardAndApply(session);
   }
 
   async function guardAndApply(session) {
     const usedAdminKey = session.login_method &&
-      (session.login_method === "admin_key" || String(session.login_method).includes("admin_key"));
+      String(session.login_method).includes("admin_key");
 
-    if (session.is_admin && usedAdminKey) {
+    if (session.is_admin && usedAdminKey && session.key) {
       const ok = await reverifyAdminSession(session);
       if (!ok) {
-        // Session was tampered with or key was revoked/expired
-        const demoted = Object.assign({}, session, {
-          is_admin: session.login_method === "discord+admin_key" ? session.is_admin && false : false,
-          plan: undefined,
-          login_method: session.user_id ? "discord" : undefined,
-          key: undefined
-        });
-        // If they had a Discord identity underneath, keep it as regular user;
-        // otherwise wipe the session.
+        // The admin key is gone/revoked/expired. Demote to whatever remains.
+        const demoted = Object.assign({}, session);
+        delete demoted.key;
+        delete demoted.plan;
         if (demoted.user_id) {
+          // Keep the Discord identity, strip admin
           demoted.is_admin = false;
           demoted.login_method = "discord";
-          localStorage.setItem(SESSION_KEY, JSON.stringify(demoted));
+          try { localStorage.setItem(SESSION_KEY, JSON.stringify(demoted)); } catch (_) {}
         } else {
           clearSession();
         }
@@ -359,12 +340,11 @@
     const isAdmin = !!session.is_admin;
 
     if (wantsAdmin && !isAdmin) {
-      // Regular Discord user trying to open an admin page - prompt for key
       showKeyPrompt("This page requires an admin key. Enter it below to unlock.");
       return;
     }
 
-    // Sidebar visibility rules
+    // Apply sidebar visibility as soon as the DOM (and thus the sidebar) exists.
     const applySidebar = () => {
       if (isAdmin) {
         showAdminNav();
@@ -378,9 +358,10 @@
     } else {
       applySidebar();
     }
-    // Re-apply after a beat in case the sidebar renders late (some dashboards do)
-    setTimeout(applySidebar, 500);
-    setTimeout(applySidebar, 1500);
+    // Re-apply in case the sidebar renders after the initial paint
+    setTimeout(applySidebar, 300);
+    setTimeout(applySidebar, 1000);
+    setTimeout(applySidebar, 2500);
 
     window.NEXAKS_SESSION = session;
   }
