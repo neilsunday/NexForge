@@ -27,34 +27,26 @@ async function signInWithDiscord() {
 }
 
 async function signOut() {
+    // Mark current session as expired before signing out
+    try { await expireCurrentSession(); } catch (_) {}
     await sb.auth.signOut();
     window.location.href = '/';
 }
 
-/**
- * Waits for session if URL has OAuth callback hash.
- * Also cleans up the URL hash after processing.
- * NEVER redirects â€” just returns session or null.
- */
 async function getSessionSafely() {
     const hasAuthHash = window.location.hash &&
                        (window.location.hash.includes('access_token') ||
                         window.location.hash.includes('error'));
 
-    // Try existing session first
     let { data: { session } } = await sb.auth.getSession();
     if (session) {
-        // Clean up hash if present
         if (hasAuthHash && window.history?.replaceState) {
             window.history.replaceState({}, '', window.location.pathname);
         }
         return session;
     }
-
-    // If no auth hash, no session, we're done
     if (!hasAuthHash) return null;
 
-    // Wait for auth state change (OAuth callback processing)
     return new Promise((resolve) => {
         let resolved = false;
         const timeout = setTimeout(() => {
@@ -69,7 +61,6 @@ async function getSessionSafely() {
                 resolved = true;
                 clearTimeout(timeout);
                 try { subscription?.unsubscribe(); } catch (e) {}
-                // Clean the URL hash to prevent re-processing
                 if (window.history?.replaceState) {
                     window.history.replaceState({}, '', window.location.pathname);
                 }
@@ -98,11 +89,122 @@ async function getUserProfile(userId) {
     }
 }
 
+// ==================== SESSION TRACKING ====================
+// One row per login in user_sessions. We store the row's ID in localStorage
+// so we can bump last_active_at on every page and mark it expired on logout.
+
+const SESSION_ROW_KEY = 'nexaks_session_row_id';
+const HEARTBEAT_INTERVAL_MS = 60_000; // 1 min
+
+// Fetch approximate geolocation from a free API (ip-api.com over HTTPS).
+// Returns { country, city, ip } or an empty object on failure. Never throws.
+async function fetchGeoInfo() {
+    try {
+        const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
+        if (!res.ok) return {};
+        const data = await res.json();
+        return {
+            country: data.country_name || null,
+            city: data.city || null,
+            ip: data.ip || null,
+        };
+    } catch (_) {
+        return {};
+    }
+}
+
+// Called once on successful login. Skips silently if the row already exists.
+async function trackLoginSession(user, loginMethod) {
+    if (!user?.id) return;
+    try {
+        // Avoid duplicate rows if the page reloads within the same login
+        const existing = localStorage.getItem(SESSION_ROW_KEY);
+        if (existing) return;
+
+        const geo = await fetchGeoInfo();
+        const profile = await getUserProfile(user.id);
+        const username =
+            profile?.username ||
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.user_metadata?.user_name ||
+            'User';
+
+        const { data, error } = await sb.from('user_sessions').insert({
+            user_id: user.id,
+            username: username,
+            login_method: loginMethod || 'discord',
+            ip_address: geo.ip || null,
+            user_agent: navigator.userAgent || null,
+            country: geo.country || null,
+            city: geo.city || null,
+        }).select('id').maybeSingle();
+
+        if (error) {
+            console.warn('Session log insert failed:', error.message);
+            return;
+        }
+        if (data?.id) {
+            localStorage.setItem(SESSION_ROW_KEY, data.id);
+        }
+    } catch (e) {
+        console.warn('trackLoginSession:', e);
+    }
+}
+
+// Bump last_active_at every minute while the tab is open.
+let _heartbeatTimer = null;
+function startSessionHeartbeat() {
+    if (_heartbeatTimer) return;
+    _heartbeatTimer = setInterval(async () => {
+        const id = localStorage.getItem(SESSION_ROW_KEY);
+        if (!id) return;
+        try {
+            await sb.from('user_sessions')
+                .update({ last_active_at: new Date().toISOString() })
+                .eq('id', id).eq('status', 'active');
+        } catch (_) {}
+    }, HEARTBEAT_INTERVAL_MS);
+}
+
+async function expireCurrentSession() {
+    const id = localStorage.getItem(SESSION_ROW_KEY);
+    if (!id) return;
+    try {
+        await sb.from('user_sessions')
+            .update({ status: 'expired', last_active_at: new Date().toISOString() })
+            .eq('id', id);
+    } catch (_) {}
+    localStorage.removeItem(SESSION_ROW_KEY);
+}
+
+// Auto-run: whenever the client loads, check for a live session and log it once.
+// Also start the heartbeat so we know when users are actually active.
+(async function autoTrackSession() {
+    try {
+        const user = await getCurrentUser();
+        if (!user) return;
+        // Detect login method from the gate.js session shape (falls back to 'discord')
+        let loginMethod = 'discord';
+        try {
+            const raw = localStorage.getItem('nexaks_session');
+            if (raw) {
+                const s = JSON.parse(raw);
+                if (s?.login_method) loginMethod = s.login_method;
+            }
+        } catch (_) {}
+        await trackLoginSession(user, loginMethod);
+        startSessionHeartbeat();
+    } catch (_) {}
+})();
+
 window.NexaKS = {
     supabase: sb,
     signInWithDiscord,
     signOut,
     getCurrentUser,
     getUserProfile,
-    getSessionSafely
+    getSessionSafely,
+    trackLoginSession,
+    expireCurrentSession,
 };
