@@ -3,7 +3,7 @@
  * Drop this into every protected page BEFORE any other JS.
  * It enforces:
  *   - No session at all           -> redirect to /login.html
- *   - Discord OAuth session only  -> allow dashboard only, hide/block admin nav
+ *   - Discord OAuth session only  -> allow dashboard only, hide admin nav
  *   - Admin key session           -> full access (re-verified against server)
  *
  * Set window.NEXAKS_PAGE = "dashboard" | "admin" | "projects" | "analytics"
@@ -18,11 +18,10 @@
 
   // Cloudflare Turnstile SITE key (public - safe to expose).
   const TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
-    "0x4AAAAAAD-YvdvOI_vA3JJt"; // Cloudflare Turnstile site key
+    "0x4AAAAAAD-YvdvOI_vA3JJt";
 
-  // Pages that require admin key. Dashboard is user-level and needs any valid login.
+  // Pages that require admin privileges (either owner or admin-key session).
   const ADMIN_PAGES = ["admin", "projects", "analytics"];
-  const USER_PAGES  = ["dashboard"];
 
   function guessPage() {
     const path = window.location.pathname.toLowerCase();
@@ -52,13 +51,8 @@
     localStorage.removeItem("nexaks_pending_discord");
   }
 
-  function redirect(url) {
-    window.location.replace(url);
-  }
+  function redirect(url) { window.location.replace(url); }
 
-  // Re-verify an admin_key session against the server so localStorage tampering
-  // cannot grant admin access, AND so RLS blocks don't cause false demotions.
-  // The server uses the service role to bypass RLS on the keys table.
   async function reverifyAdminSession(session) {
     if (!session || !session.key) return false;
     try {
@@ -69,47 +63,26 @@
       });
       const data = await res.json().catch(() => ({}));
       return !!(res.ok && data.success);
-    } catch (_) {
-      return false;
-    }
+    } catch (_) { return false; }
   }
 
-  // Verify a Turnstile token with our server. Returns true if valid.
-  async function verifyTurnstileToken(token) {
-    try {
-      const res = await fetch("/api/verify-turnstile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token })
-      });
-      const data = await res.json();
-      return !!data.success;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  // Load the Turnstile script once, on demand.
   function loadTurnstileScript() {
     if (window.turnstile) return Promise.resolve();
     if (window._nexaksTurnstileLoading) return window._nexaksTurnstileLoading;
     window._nexaksTurnstileLoading = new Promise((resolve) => {
       const s = document.createElement("script");
       s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-      s.async = true;
-      s.defer = true;
+      s.async = true; s.defer = true;
       s.onload = () => resolve();
-      s.onerror = () => resolve(); // resolve either way; verify will just fail
+      s.onerror = () => resolve();
       document.head.appendChild(s);
     });
     return window._nexaksTurnstileLoading;
   }
 
   function showKeyPrompt(reason) {
-    // Full-screen modal asking for admin key (used when a non-admin tries admin nav)
     const existing = document.getElementById("nexaks-key-prompt");
     if (existing) { existing.style.display = "flex"; return; }
-
     const overlay = document.createElement("div");
     overlay.id = "nexaks-key-prompt";
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;font-family:'Inter',sans-serif;";
@@ -134,7 +107,6 @@
     const cancel = document.getElementById("nexaks-prompt-cancel");
     const turnstileBox = document.getElementById("nexaks-prompt-turnstile");
 
-    // Render Turnstile widget (async - safe to submit once user has a token)
     let turnstileToken = null;
     let turnstileWidgetId = null;
     loadTurnstileScript().then(() => {
@@ -147,9 +119,7 @@
             "expired-callback": () => { turnstileToken = null; },
             "error-callback": () => { turnstileToken = null; }
           });
-        } catch (e) {
-          console.warn("Turnstile render failed:", e);
-        }
+        } catch (e) { console.warn("Turnstile render failed:", e); }
       }
     });
 
@@ -161,7 +131,6 @@
 
     cancel.addEventListener("click", () => {
       overlay.remove();
-      // Go back to dashboard if they cancel
       if (PAGE !== "dashboard") window.location.href = "/dashboard.html";
     });
 
@@ -182,19 +151,14 @@
       submit.textContent = "Verifying...";
 
       try {
-        // Single server-side call: verifies captcha + looks up key with service role.
-        // Bypasses RLS on the keys table so unclaimed/anon-blocked admin keys work.
         const res = await fetch("/api/verify-admin-key", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ key: key, token: turnstileToken })
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || "Verification failed.");
-        }
+        if (!res.ok || !data.success) throw new Error(data.error || "Verification failed.");
 
-        // Merge admin credentials into existing session (or create fresh)
         const existing = readSession() || {};
         const session = Object.assign({}, existing, {
           key: data.session.key,
@@ -208,54 +172,107 @@
         localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 
         overlay.remove();
-        // Send them straight to the admin panel after successful login
-        window.location.href = "/admin.html";
+        // Admin-key users land on the dashboard (they have full-site freedom
+        // from there via the sidebar). This unifies the entry point.
+        window.location.href = "/dashboard.html";
       } catch (ex) {
         err.textContent = ex.message || "Verification failed.";
         err.style.display = "block";
         submit.disabled = false;
         submit.textContent = "Verify";
-        // Reset the captcha so the user gets a fresh token
         try { window.turnstile && turnstileWidgetId != null && window.turnstile.reset(turnstileWidgetId); } catch (_) {}
         turnstileToken = null;
       }
     });
   }
 
-  function hideAdminNavLinks() {
-    // Hide anything that links to admin.html / projects.html / analytics.html in the sidebar
-    const links = document.querySelectorAll('a[href*="admin.html"], a[href*="projects.html"], a[href*="analytics.html"]');
-    links.forEach(a => {
-      // Skip logo / non-nav anchors
+  // ---------- SIDEBAR VISIBILITY ----------
+  // Roles:
+  //   OWNER          = Discord OAuth AND is_admin=true in DB
+  //   ADMIN_KEY      = logged in through /api/verify-admin-key
+  //   REGULAR        = Discord OAuth AND is_admin=false (or no admin session at all)
+  //
+  // OWNER  + ADMIN_KEY  =>  show every nav item, including the "Admin Panel" link
+  // REGULAR            =>  hide Projects, Bot Commands, Analytics, Admin Panel
+
+  const ADMIN_ONLY_HREF_PATTERNS = ["projects.html", "analytics.html", "admin.html"];
+  const ADMIN_ONLY_SECTIONS      = ["botcommands"];
+
+  function hideAdminNav() {
+    document.querySelectorAll("a").forEach(function (a) {
       if (a.classList.contains("logo")) return;
-      a.style.display = "none";
+      const href = (a.getAttribute("href") || "").toLowerCase();
+      const onclick = (a.getAttribute("onclick") || "").toLowerCase();
+
+      for (const pat of ADMIN_ONLY_HREF_PATTERNS) {
+        if (href.includes(pat)) { a.style.display = "none"; return; }
+      }
+      for (const sec of ADMIN_ONLY_SECTIONS) {
+        if (onclick.includes("showsection('" + sec + "'") ||
+            onclick.includes('showsection("' + sec + '"')) {
+          a.style.display = "none";
+          return;
+        }
+      }
     });
   }
 
-  function interceptAdminNavClicks() {
-    // Intercept clicks on hidden or visible admin links so a Discord-only user is prompted
+  function showAdminNav() {
+    // Unhide anything that was hidden AND make the "Admin Panel" link functional.
+    document.querySelectorAll("a").forEach(function (a) {
+      if (a.classList.contains("logo")) return;
+      const href = (a.getAttribute("href") || "").toLowerCase();
+      const onclick = (a.getAttribute("onclick") || "").toLowerCase();
+      let isAdminItem = false;
+      for (const pat of ADMIN_ONLY_HREF_PATTERNS) if (href.includes(pat)) { isAdminItem = true; break; }
+      if (!isAdminItem) {
+        for (const sec of ADMIN_ONLY_SECTIONS) {
+          if (onclick.includes("showsection('" + sec + "'") ||
+              onclick.includes('showsection("' + sec + '"')) {
+            isAdminItem = true; break;
+          }
+        }
+      }
+      if (isAdminItem) a.style.display = "";
+    });
+
+    // "Admin Panel" link on the dashboard is a plain anchor with id="adminLink"
+    // and no href. Point it at admin.html so it actually navigates.
+    const adminLink = document.getElementById("adminLink");
+    if (adminLink) {
+      adminLink.href = "admin.html";
+      adminLink.style.display = "";
+    }
+  }
+
+  function blockAdminNavClicks() {
     document.addEventListener("click", function (e) {
       const link = e.target.closest("a");
-      if (!link) return;
+      if (!link || link.classList.contains("logo")) return;
       const href = (link.getAttribute("href") || "").toLowerCase();
-      if (!href) return;
-      const targetsAdmin =
-        href.includes("admin.html") ||
-        href.includes("projects.html") ||
-        href.includes("analytics.html");
-      if (!targetsAdmin) return;
-      // Skip logo
-      if (link.classList.contains("logo")) return;
+      const onclick = (link.getAttribute("onclick") || "").toLowerCase();
+
+      let isAdminItem = false;
+      for (const pat of ADMIN_ONLY_HREF_PATTERNS) if (href.includes(pat)) { isAdminItem = true; break; }
+      if (!isAdminItem) {
+        for (const sec of ADMIN_ONLY_SECTIONS) {
+          if (onclick.includes("showsection('" + sec + "'") ||
+              onclick.includes('showsection("' + sec + '"')) {
+            isAdminItem = true; break;
+          }
+        }
+      }
+      if (!isAdminItem) return;
 
       e.preventDefault();
+      e.stopPropagation();
+      // Regular users get the admin-key prompt so they can escalate on the spot.
       showKeyPrompt("This page requires an admin key. Enter it below to unlock.");
     }, true);
   }
 
   // ---------- MAIN GATE LOGIC ----------
 
-  // 1. Check for Supabase Discord session first (if the client is already loaded)
-  //    We need to wait a tick for supabase.js to init.
   async function detectDiscordSession() {
     if (!window.NexaKS?.getCurrentUser) return null;
     try {
@@ -265,7 +282,6 @@
   }
 
   async function boot() {
-    // Wait briefly for NexaKS supabase client to be ready
     for (let i = 0; i < 20 && !window.NexaKS; i++) {
       await new Promise(r => setTimeout(r, 100));
     }
@@ -273,9 +289,7 @@
     const localSession = readSession();
     const discordUser = await detectDiscordSession();
 
-    // If we came back from Discord OAuth, mint a user-level session
-    if (discordUser && (!localSession || localSession.login_method === "admin_key" && !localSession.user_id)) {
-      // Fetch profile to see if is_admin flag is set (redeemed an admin key already)
+    if (discordUser && (!localSession || (localSession.login_method === "admin_key" && !localSession.user_id))) {
       let isAdmin = false;
       let username = "User";
       try {
@@ -297,7 +311,6 @@
       return;
     }
 
-    // No Discord session either
     if (!localSession) {
       redirect("/login.html");
       return;
@@ -306,31 +319,29 @@
     await guardAndApply(localSession);
   }
 
-  // Wrap applyGate with a DB re-verification step for admin sessions.
-  // If a client tampered with localStorage to grant themselves is_admin,
-  // the DB check will catch it and demote the session.
   async function guardAndApply(session) {
-    const claimsAdmin = !!session.is_admin;
     const usedAdminKey = session.login_method &&
-      (session.login_method === "admin_key" || session.login_method.includes("admin_key"));
+      (session.login_method === "admin_key" || String(session.login_method).includes("admin_key"));
 
-    if (claimsAdmin && usedAdminKey) {
+    if (session.is_admin && usedAdminKey) {
       const ok = await reverifyAdminSession(session);
       if (!ok) {
-        // Demote - the key is gone, revoked, expired, or the plan is not admin.
-        // Keep any Discord identity but strip admin flags.
+        // Session was tampered with or key was revoked/expired
         const demoted = Object.assign({}, session, {
-          is_admin: false,
-          plan: session.login_method === "admin_key" ? undefined : session.plan,
-          login_method: session.login_method === "admin_key" ? "discord" : "discord",
+          is_admin: session.login_method === "discord+admin_key" ? session.is_admin && false : false,
+          plan: undefined,
+          login_method: session.user_id ? "discord" : undefined,
           key: undefined
         });
+        // If they had a Discord identity underneath, keep it as regular user;
+        // otherwise wipe the session.
         if (demoted.user_id) {
+          demoted.is_admin = false;
+          demoted.login_method = "discord";
           localStorage.setItem(SESSION_KEY, JSON.stringify(demoted));
         } else {
           clearSession();
         }
-        // If the current page needs admin, prompt again with fresh Turnstile.
         if (ADMIN_PAGES.includes(PAGE)) {
           showKeyPrompt("Your admin session is no longer valid. Enter your admin key again.");
           return;
@@ -345,32 +356,35 @@
 
   function applyGate(session) {
     const wantsAdmin = ADMIN_PAGES.includes(PAGE);
+    const isAdmin = !!session.is_admin;
 
-    if (wantsAdmin && !session.is_admin) {
-      // User is logged in via Discord only, trying to open an admin page
+    if (wantsAdmin && !isAdmin) {
+      // Regular Discord user trying to open an admin page - prompt for key
       showKeyPrompt("This page requires an admin key. Enter it below to unlock.");
       return;
     }
 
-    // If they're on a user page but not admin, hide admin nav links
-    if (!session.is_admin) {
-      // Wait for DOM to be ready
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () => {
-          hideAdminNavLinks();
-          interceptAdminNavClicks();
-        });
+    // Sidebar visibility rules
+    const applySidebar = () => {
+      if (isAdmin) {
+        showAdminNav();
       } else {
-        hideAdminNavLinks();
-        interceptAdminNavClicks();
+        hideAdminNav();
+        blockAdminNavClicks();
       }
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", applySidebar);
+    } else {
+      applySidebar();
     }
+    // Re-apply after a beat in case the sidebar renders late (some dashboards do)
+    setTimeout(applySidebar, 500);
+    setTimeout(applySidebar, 1500);
 
-    // Expose session globally for pages that need it
     window.NEXAKS_SESSION = session;
   }
 
-  // Global logout helper
   window.nexaksLogout = async function () {
     if (!confirm("Sign out from NexaKS?")) return;
     clearSession();
@@ -379,131 +393,4 @@
   };
 
   boot();
-})();
-
-
-/* ============================================================
- * NexForge - Sidebar Access Control
- * ------------------------------------------------------------
- * What it does:
- *   - If user is Discord-only (is_admin: false in DB):
- *       -> Hides Projects, Analytics, Bot Commands links in sidebar
- *       -> Blocks clicks to those pages (redirects back to dashboard)
- *   - If user is admin (is_admin: true in DB):
- *       -> Shows all sidebar links normally
- * ============================================================ */
-
-(function () {
-    'use strict';
-
-    // Admin-only link patterns (href includes any of these = admin-only)
-    const ADMIN_LINK_PATTERNS = [
-        'projects.html',
-        'analytics.html',
-        'admin.html'
-    ];
-
-    // Admin-only section names (onclick="showSection('xxx')" = admin-only)
-    const ADMIN_SECTIONS = [
-        'botcommands'
-    ];
-
-    let hasHiddenLinks = false;
-
-    function hideAdminLinks() {
-        if (hasHiddenLinks) return;
-
-        // Hide anchor links matching admin patterns
-        document.querySelectorAll('a').forEach(function (a) {
-            const href = (a.getAttribute('href') || '').toLowerCase();
-            const onclick = (a.getAttribute('onclick') || '').toLowerCase();
-
-            // Skip logo links
-            if (a.classList.contains('logo')) return;
-
-            // Hide by href
-            for (const pattern of ADMIN_LINK_PATTERNS) {
-                if (href.includes(pattern)) {
-                    a.style.display = 'none';
-                    return;
-                }
-            }
-
-            // Hide by onclick showSection
-            for (const section of ADMIN_SECTIONS) {
-                if (onclick.includes("showsection('" + section + "'") ||
-                    onclick.includes('showsection("' + section + '"')) {
-                    a.style.display = 'none';
-                    return;
-                }
-            }
-        });
-
-        hasHiddenLinks = true;
-    }
-
-    function blockAdminClicks() {
-        // Extra layer: intercept any click on admin links (in case dynamically added)
-        document.addEventListener('click', function (e) {
-            const link = e.target.closest('a');
-            if (!link) return;
-
-            const href = (link.getAttribute('href') || '').toLowerCase();
-            for (const pattern of ADMIN_LINK_PATTERNS) {
-                if (href.includes(pattern) && !link.classList.contains('logo')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return false;
-                }
-            }
-        }, true);
-    }
-
-    async function checkAccess() {
-        // Wait for NexaKS supabase client to be ready
-        for (let i = 0; i < 40 && !window.NexaKS; i++) {
-            await new Promise(r => setTimeout(r, 100));
-        }
-
-        if (!window.NexaKS?.getCurrentUser) {
-            // Supabase not loaded - safest to hide admin links
-            hideAdminLinks();
-            blockAdminClicks();
-            return;
-        }
-
-        try {
-            const user = await window.NexaKS.getCurrentUser();
-            if (!user) {
-                // Not signed in - hide admin links
-                hideAdminLinks();
-                blockAdminClicks();
-                return;
-            }
-
-            const profile = await window.NexaKS.getUserProfile(user.id);
-            const isAdmin = !!profile?.is_admin;
-
-            if (!isAdmin) {
-                // Discord-only user - hide admin sections
-                hideAdminLinks();
-                blockAdminClicks();
-            }
-            // Admin - do nothing, all links visible
-        } catch (e) {
-            // On error, hide admin links to be safe
-            hideAdminLinks();
-            blockAdminClicks();
-        }
-    }
-
-    // Run as soon as DOM is ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', checkAccess);
-    } else {
-        checkAccess();
-    }
-
-    // Also run again after 1s in case sidebar renders late
-    setTimeout(checkAccess, 1000);
 })();
