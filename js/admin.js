@@ -50,6 +50,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       loadProjectsForForm(),
       loadNotifications(),
       loadNotifStats(),
+      loadSessions(),
+      loadSessionsStats(),
     ]);
 
     // Subscribe to real-time log inserts for the toast + badge system
@@ -736,6 +738,11 @@ function showTab(tab) {
     clearNotifBadge();
     // Refresh stats on tab open (cheap query)
     if (typeof loadNotifStats === "function") loadNotifStats();
+  }
+  // If entering the sessions tab, refresh the data
+  if (tab === "sessions") {
+    if (typeof loadSessions === "function") loadSessions(true);
+    if (typeof loadSessionsStats === "function") loadSessionsStats();
   }
 }
 
@@ -1515,4 +1522,206 @@ function showNotifToast(title, username, message) {
     toast.style.transform = "translateX(20px)";
     setTimeout(() => toast.remove(), 300);
   }, 4500);
+}
+
+
+// ========== Sessions (Login history) ==========
+// Displays login sessions from user_sessions table with 7-day retention.
+// Auto-marks sessions as 'expired' if last_active_at is > 15 minutes old.
+
+const SESSIONS_PAGE_SIZE = 100;
+const SESSION_STALE_MINUTES = 15;
+let sessionsOffset = 0;
+let sessionsCache = [];
+let sessionsFilterValue = "all";
+let sessionsSearchValue = "";
+
+function isSessionStale(session) {
+  if (!session || !session.last_active_at) return true;
+  const lastActive = new Date(session.last_active_at);
+  const staleMs = SESSION_STALE_MINUTES * 60 * 1000;
+  return (new Date() - lastActive) > staleMs;
+}
+
+function effectiveSessionStatus(session) {
+  if (session.status === "revoked") return "revoked";
+  if (session.status === "expired") return "expired";
+  return isSessionStale(session) ? "expired" : "active";
+}
+
+function sessionStatusBadgeClass(status) {
+  if (status === "active") return "badge-success";
+  if (status === "revoked") return "badge-danger";
+  return "badge-warning"; // expired
+}
+
+function loginMethodLabel(method) {
+  if (method === "admin_key") return "Admin key";
+  if (method === "discord") return "Discord";
+  if (method === "discord+admin_key") return "Discord + Admin";
+  return method || "Unknown";
+}
+
+function loginMethodBadgeClass(method) {
+  if (method === "admin_key" || method === "discord+admin_key") return "badge-warning";
+  if (method === "discord") return "badge-info";
+  return "badge";
+}
+
+// Parse the userAgent into a friendly "Browser on OS"
+function parseUserAgent(ua) {
+  if (!ua) return "-";
+  const s = String(ua);
+  let browser = "Browser";
+  if (/Edg\//.test(s)) browser = "Edge";
+  else if (/OPR\/|Opera/.test(s)) browser = "Opera";
+  else if (/Chrome\//.test(s) && !/Chromium/.test(s)) browser = "Chrome";
+  else if (/Firefox\//.test(s)) browser = "Firefox";
+  else if (/Safari\//.test(s) && !/Chrome/.test(s)) browser = "Safari";
+  let os = "";
+  if (/Windows NT 10/.test(s)) os = "Windows 10/11";
+  else if (/Windows NT/.test(s)) os = "Windows";
+  else if (/Mac OS X/.test(s)) os = "macOS";
+  else if (/Android/.test(s)) os = "Android";
+  else if (/iPhone|iPad|iOS/.test(s)) os = "iOS";
+  else if (/Linux/.test(s)) os = "Linux";
+  return os ? browser + " on " + os : browser;
+}
+
+function formatSessionTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (isNaN(d)) return "-";
+  return d.toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+async function loadSessions(reset = true) {
+  if (reset) {
+    sessionsOffset = 0;
+    sessionsCache = [];
+    const tbody = document.getElementById("sessionsTableBody");
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>';
+  }
+
+  try {
+    const { data, error } = await NexaKS.supabase
+      .from("user_sessions")
+      .select("*")
+      .order("logged_in_at", { ascending: false })
+      .range(sessionsOffset, sessionsOffset + SESSIONS_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    if (reset) sessionsCache = data || [];
+    else sessionsCache = sessionsCache.concat(data || []);
+    sessionsOffset += SESSIONS_PAGE_SIZE;
+
+    renderSessions();
+
+    const loadMoreBtn = document.getElementById("sessionsLoadMore");
+    if (loadMoreBtn) {
+      loadMoreBtn.style.display = (data && data.length === SESSIONS_PAGE_SIZE) ? "inline-flex" : "none";
+    }
+  } catch (e) {
+    console.error("loadSessions:", e);
+    const tbody = document.getElementById("sessionsTableBody");
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:32px;">Failed to load: ' + escapeHtmlNotif(e.message) + '</td></tr>';
+  }
+}
+
+function loadMoreSessions() {
+  loadSessions(false);
+}
+
+function filterSessions() {
+  const sel = document.getElementById("sessionsFilter");
+  const search = document.getElementById("sessionsSearch");
+  sessionsFilterValue = sel ? sel.value : "all";
+  sessionsSearchValue = (search?.value || "").toLowerCase().trim();
+  renderSessions();
+}
+
+function renderSessions() {
+  const tbody = document.getElementById("sessionsTableBody");
+  const desc = document.getElementById("sessionsDesc");
+  if (!tbody) return;
+
+  // Apply client-side filters
+  const filtered = sessionsCache.filter((s) => {
+    const status = effectiveSessionStatus(s);
+    if (sessionsFilterValue === "active" && status !== "active") return false;
+    if (sessionsFilterValue === "expired" && status === "active") return false;
+    if (sessionsFilterValue === "discord" && s.login_method !== "discord") return false;
+    if (sessionsFilterValue === "admin_key") {
+      if (s.login_method !== "admin_key" && s.login_method !== "discord+admin_key") return false;
+    }
+    if (sessionsSearchValue) {
+      const hay = (s.username || "").toLowerCase();
+      if (!hay.includes(sessionsSearchValue)) return false;
+    }
+    return true;
+  });
+
+  if (desc) {
+    desc.textContent = "Showing " + filtered.length + " of " + sessionsCache.length + " login" + (sessionsCache.length === 1 ? "" : "s");
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px;">No sessions match this filter</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((s) => {
+    const status = effectiveSessionStatus(s);
+    const location = [s.city, s.country].filter(Boolean).join(", ") || (s.ip_address ? escapeHtmlNotif(s.ip_address) : "-");
+    return "<tr>" +
+      "<td>" + escapeHtmlNotif(s.username || "Unknown") + "</td>" +
+      '<td><span class="badge ' + loginMethodBadgeClass(s.login_method) + '">' + escapeHtmlNotif(loginMethodLabel(s.login_method)) + "</span></td>" +
+      '<td style="color:var(--text-secondary);font-size:13px;">' + escapeHtmlNotif(location) + "</td>" +
+      '<td style="color:var(--text-secondary);font-size:13px;">' + escapeHtmlNotif(parseUserAgent(s.user_agent)) + "</td>" +
+      '<td style="color:var(--text-secondary);font-size:13px;white-space:nowrap;">' + escapeHtmlNotif(formatSessionTime(s.logged_in_at)) + "</td>" +
+      '<td style="color:var(--text-secondary);font-size:13px;white-space:nowrap;">' + escapeHtmlNotif(formatSessionTime(s.last_active_at)) + "</td>" +
+      '<td><span class="badge ' + sessionStatusBadgeClass(status) + '">' + status + "</span></td>" +
+      "</tr>";
+  }).join("");
+}
+
+async function loadSessionsStats() {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const iso = startOfDay.toISOString();
+  const staleThreshold = new Date(Date.now() - SESSION_STALE_MINUTES * 60 * 1000).toISOString();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+
+  try {
+    const [activeRes, todayRes, adminRes, uniqueRes] = await Promise.all([
+      // Active = status='active' AND last_active within stale threshold
+      NexaKS.supabase.from("user_sessions")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "active")
+        .gte("last_active_at", staleThreshold),
+      NexaKS.supabase.from("user_sessions")
+        .select("*", { count: "exact", head: true })
+        .gte("logged_in_at", iso),
+      NexaKS.supabase.from("user_sessions")
+        .select("*", { count: "exact", head: true })
+        .in("login_method", ["admin_key", "discord+admin_key"])
+        .gte("logged_in_at", iso),
+      NexaKS.supabase.from("user_sessions")
+        .select("user_id")
+        .gte("logged_in_at", sevenDaysAgo)
+        .not("user_id", "is", null),
+    ]);
+
+    const $ = (id) => document.getElementById(id);
+    if ($("sessStatActive")) $("sessStatActive").textContent = activeRes.count ?? 0;
+    if ($("sessStatToday")) $("sessStatToday").textContent = todayRes.count ?? 0;
+    if ($("sessStatAdmin")) $("sessStatAdmin").textContent = adminRes.count ?? 0;
+    const uniqueUsers = new Set((uniqueRes.data || []).map((r) => r.user_id)).size;
+    if ($("sessStatUnique")) $("sessStatUnique").textContent = uniqueUsers;
+  } catch (e) {
+    console.error("loadSessionsStats:", e);
+  }
 }
