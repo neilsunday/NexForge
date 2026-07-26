@@ -20,7 +20,7 @@
   // Replace with your own site key. Falls back to Cloudflare's test key so
   // dev environments still work while you set this up.
   const TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
-    "0x4AAAAAAB0000000000000000"; // TODO: replace with your real site key
+    "0x4AAAAAAD-A8ItQlb_BdoB8"; // Cloudflare Turnstile site key
 
   // Pages that require admin key. Dashboard is user-level and needs any valid login.
   const ADMIN_PAGES = ["admin", "projects", "analytics"];
