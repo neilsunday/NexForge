@@ -222,18 +222,36 @@ async function loadStats() {
 // ========== Load all keys ==========
 async function loadKeys() {
   try {
-    const { data, error } = await NexaKS.supabase
-      .from("keys")
-      .select("*, users!keys_user_id_fkey(username, avatar_url)")
-      .order("created_at", { ascending: false })
-      .limit(50);
+    // Detect session type - admin_key vs Discord owner
+    let sessionRaw = null;
+    try { sessionRaw = localStorage.getItem("nexaks_session"); } catch (_) {}
+    const session = sessionRaw ? JSON.parse(sessionRaw) : null;
+    const isAdminKey = !!(session && String(session.login_method || "").includes("admin_key") && session.key);
 
-    if (error) throw error;
-    allKeys = data || [];
+    const body = { limit: 50 };
+    if (isAdminKey) {
+      body.admin_key = session.key;
+    } else if (currentUser?.id) {
+      body.owner_id = currentUser.id;
+    } else {
+      throw new Error("No session context");
+    }
+
+    const res = await fetch("/api/admin/list-keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.error || "Failed to load keys");
+
+    allKeys = data.keys || [];
 
     const desc = document.getElementById("keysDesc");
-    if (desc)
-      desc.textContent = "Showing " + allKeys.length + " most recent keys";
+    if (desc) {
+      const scopeLabel = data.scope === "own" ? " (your keys)" : "";
+      desc.textContent = "Showing " + allKeys.length + " most recent keys" + scopeLabel;
+    }
 
     renderKeysTable(allKeys);
   } catch (e) {
@@ -1611,7 +1629,7 @@ function showNotifToast(title, username, message) {
   titleEl.textContent = title;
   const bodyEl = document.createElement("div");
   bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
-  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â " + message : "");
+  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â " + message : "");
   toast.appendChild(titleEl);
   toast.appendChild(bodyEl);
   container.appendChild(toast);
