@@ -713,7 +713,7 @@ async function handleGetScript(interaction, projectSlug) {
         } else {
             const sep = base.includes('?') ? '&' : '?';
             loader = '_G.script_key = "' + key.key + '"\n' +
-                'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key))()';
+                'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
         }
         return sendLoader(interaction, loader, !script.keyless);
     }
@@ -747,7 +747,7 @@ async function handleGetScript(interaction, projectSlug) {
     } else {
         const sep = base.includes('?') ? '&' : '?';
         loader = '_G.script_key = "' + key.key + '"\n' +
-            'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key))()';
+            'loadstring(game:HttpGet("' + base + sep + 'key=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
     }
     return sendLoader(interaction, loader, !script.keyless);
 }
