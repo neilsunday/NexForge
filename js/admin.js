@@ -216,7 +216,9 @@ function renderKeysTable(keys) {
             day: "numeric",
             year: "numeric",
           })
-        : "Lifetime";
+        : k.duration_days
+          ? k.duration_days + " day" + (k.duration_days > 1 ? "s" : "") + " (unclaimed)"
+          : "Lifetime";
       const isRevoked = k.status === "revoked";
       const keyStyle = isRevoked
         ? "font-family:monospace;font-size:12px;color:var(--text-muted);text-decoration:line-through;"
