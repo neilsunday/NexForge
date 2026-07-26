@@ -142,10 +142,9 @@ function renderUserInfo() {
     $("userAvatar").textContent = username.charAt(0).toUpperCase();
   }
 
-  if (currentProfile?.is_admin && $("adminLink")) {
-    $("adminLink").style.display = "flex";
-    $("adminLink").href = "admin.html";
-  }
+  // Admin nav visibility is now owned by js/gate.js (which knows whether
+  // the user is Discord-owner, admin-key session, or a regular user).
+  // Do NOT touch adminLink here or we'd override gate.js for regular users.
 
   const plan = currentKey?.plan || "free";
   if ($("userRole"))
@@ -306,10 +305,6 @@ function renderKey() {
   }
 
   // ---- SHORT LOADER ----
-  // The server (v3+) rejects any key-based load without an &hwid= param, so
-  // every loader we hand out must include the Roblox client id.
-  // If the key is attached to a project with a published script, serve
-  // the project loader; otherwise fall back to /api/verify.
   const origin = window.location.origin;
   const HWID_SUFFIX =
     '&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()';
@@ -481,7 +476,6 @@ function closeResetModal() {
 async function confirmReset() {
   if (!currentKey) return showToast("No active license", "error");
 
-  // Enforce cooldown BEFORE closing the modal or showing "resetting"
   if (currentKey.last_hwid_reset) {
     const hrs =
       (new Date() - new Date(currentKey.last_hwid_reset)) / 3600000;
@@ -558,8 +552,6 @@ async function confirmRedeem() {
   if (existing.status === "revoked") return showToast("Key revoked", "error");
   if (existing.status === "expired") return showToast("Key expired", "error");
 
-  // Enforce plan/project match: if the key is tied to a project, that project
-  // must have a published script for the key's plan. Admin keys skip this.
   if (existing.project_id && existing.plan !== "admin") {
     try {
       const { data: proj } = await NexaKS.supabase
@@ -602,8 +594,6 @@ async function confirmRedeem() {
     .eq("key", key);
   if (error) return showToast("Redeem failed: " + error.message, "error");
 
-  // Promote to admin if the redeemed key is an admin-plan key
-  // (matches the Discord bot's redeem behavior).
   if (existing.plan === "admin") {
     try {
       await NexaKS.supabase
