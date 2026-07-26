@@ -777,7 +777,7 @@
     }
 
     // ---- Admin Key Modal ----
-    // Turnstile site key â€” replace with your real public site key.
+    // Turnstile site key Ã¢â‚¬â€ replace with your real public site key.
     // Falls back to Cloudflare's always-passes test key so the modal works out of the box.
     const NEXAKS_TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
       '0x4AAAAAAD-YvdvOI_vA3JJt'; // Cloudflare Turnstile site key
@@ -848,36 +848,23 @@
       btn.innerHTML = '<span class="spinner-inline"></span> Verifying...';
 
       try {
-        // 1. Verify the Turnstile token with our server BEFORE hitting the DB.
-        const captchaRes = await fetch('/api/verify-turnstile', {
+        // Single server-side call: verifies captcha + looks up key with service role.
+        // Bypasses RLS on the keys table so unclaimed/anon-blocked admin keys work.
+        const res = await fetch('/api/verify-admin-key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: _adminKeyTurnstileToken })
+          body: JSON.stringify({ key: key, token: _adminKeyTurnstileToken })
         });
-        const captchaData = await captchaRes.json();
-        if (!captchaData.success) throw new Error('Captcha verification failed. Please try again.');
-
-        // 2. Look up the key.
-        const { data: keyRow, error } = await NexaKS.supabase
-          .from('keys')
-          .select('key, plan, status, expires_at, user_id, users:user_id(id, username, is_banned)')
-          .eq('key', key).maybeSingle();
-
-        if (error) throw new Error('Database error: ' + error.message);
-        if (!keyRow) throw new Error('Key not found. Check that you copied it correctly.');
-        if (keyRow.plan !== 'admin') throw new Error('This is not an admin key. Regular license keys cannot log in here.');
-        if (keyRow.status === 'revoked') throw new Error('This admin key has been revoked.');
-        if (keyRow.status === 'expired') throw new Error('This admin key has expired.');
-        if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
-          throw new Error('This admin key expired on ' + new Date(keyRow.expires_at).toLocaleDateString());
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Verification failed.');
         }
-        if (keyRow.users?.is_banned) throw new Error('The account tied to this key is banned.');
 
         const session = {
-          key: keyRow.key,
-          plan: keyRow.plan,
-          user_id: keyRow.user_id || null,
-          username: keyRow.users?.username || 'Admin',
+          key: data.session.key,
+          plan: 'admin',
+          user_id: data.session.user_id || null,
+          username: data.session.username || 'Admin',
           is_admin: true,
           login_method: 'admin_key',
           expires_at: Date.now() + 7 * 24 * 3600 * 1000
