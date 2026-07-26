@@ -158,7 +158,21 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="form-group"><label class="form-label">Lua Content</label><textarea class="form-textarea" id="scriptContent" placeholder="print('Hello from NexaKS')" style="min-height:100px; font-size:12px;"></textarea></div>
+                        <div class="form-group">
+                            <label class="form-label" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                                <span>Lua Content</span>
+                                <span style="display:flex;gap:8px;align-items:center;">
+                                    <label for="scriptFileInput" class="btn btn-ghost" style="padding:4px 12px;font-size:12px;cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:6px;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                        Upload File
+                                    </label>
+                                    <input type="file" id="scriptFileInput" accept=".lua,.txt,text/plain" style="display:none;" onchange="handleScriptFileUpload(event, 'scriptContent')">
+                                    <span id="scriptFileName" style="font-size:12px;color:var(--text-muted);"></span>
+                                </span>
+                            </label>
+                            <textarea class="form-textarea" id="scriptContent" placeholder="print('Hello from NexaKS') or tap Upload File" style="min-height:100px; font-size:12px;"></textarea>
+                            <div class="form-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Accepts .lua or .txt files up to 10 MB. Mobile-friendly â€” no copy-paste needed.</div>
+                        </div>
                         <button class="btn btn-primary" onclick="addScript()">Save Script</button>
                     </div>
                 </div>
@@ -263,14 +277,25 @@
     <div class="modal-overlay" id="updateModal">
         <div class="modal" style="max-width:640px;">
             <div class="modal-title" id="updateScriptTitle">Update Script</div>
-            <div class="modal-desc">Paste the new Lua content below. The previous version is replaced on save - clients get the new version on next execution automatically. You will not see the old content here.</div>
+            <div class="modal-desc">Paste the new Lua content below, or upload a .lua/.txt file. The previous version is replaced on save - clients get the new version on next execution automatically. You will not see the old content here.</div>
             <div class="form-group">
                 <label class="form-label">Version</label>
                 <input type="text" class="form-input" id="updateScriptVersion" placeholder="1.0.1">
             </div>
             <div class="form-group">
-                <label class="form-label">New Lua Content</label>
-                <textarea class="form-textarea" id="updateScriptContent" placeholder="print('Updated script')" style="min-height:160px; font-size:12px; font-family:'JetBrains Mono',monospace;"></textarea>
+                <label class="form-label" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <span>New Lua Content</span>
+                    <span style="display:flex;gap:8px;align-items:center;">
+                        <label for="updateScriptFileInput" class="btn btn-ghost" style="padding:4px 12px;font-size:12px;cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Upload File
+                        </label>
+                        <input type="file" id="updateScriptFileInput" accept=".lua,.txt,text/plain" style="display:none;" onchange="handleScriptFileUpload(event, 'updateScriptContent')">
+                        <span id="updateScriptFileName" style="font-size:12px;color:var(--text-muted);"></span>
+                    </span>
+                </label>
+                <textarea class="form-textarea" id="updateScriptContent" placeholder="print('Updated script') or tap Upload File" style="min-height:160px; font-size:12px; font-family:'JetBrains Mono',monospace;"></textarea>
+                <div class="form-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Accepts .lua or .txt files up to 10 MB.</div>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-ghost" onclick="closeUpdateModal()">Cancel</button>
