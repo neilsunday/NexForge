@@ -447,6 +447,77 @@ app.post('/api/admin/generate-keys', loginRateLimit, async (req, res) => {
 });
 
 // ========================================
+// /api/admin/list-keys - Scoped keys listing
+// Owner (is_admin=true in DB) sees ALL keys.
+// Admin-key session sees only keys they created (created_by = their user_id).
+// ========================================
+app.post('/api/admin/list-keys', loginRateLimit, async (req, res) => {
+    try {
+        if (!sb) return res.status(500).json({ success: false, error: 'Server not configured' });
+        const body = req.body || {};
+        const adminKey = body.admin_key ? String(body.admin_key).trim().toUpperCase() : '';
+        const ownerId = body.owner_id ? String(body.owner_id) : '';
+        const limit = Math.min(500, Math.max(1, Number.isFinite(+body.limit) ? Math.floor(+body.limit) : 50));
+
+        // Determine scope: owner (all) or admin_key (created_by scoped)
+        let scopeCreatorId = null;      // null = see all (owner)
+        let requesterId = null;
+
+        if (adminKey && /^NXKS-[A-Z0-9-]{19}$/.test(adminKey)) {
+            // Admin-key path: validate key + resolve creator
+            const { data: keyRow } = await sb.from('keys')
+                .select('user_id, plan, status, expires_at, users:user_id(is_admin, is_banned)')
+                .eq('key', adminKey).maybeSingle();
+            if (!keyRow || keyRow.plan !== 'admin' || keyRow.status !== 'active') {
+                return res.status(401).json({ success: false, error: 'Invalid admin key' });
+            }
+            if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
+                return res.status(401).json({ success: false, error: 'Admin key expired' });
+            }
+            if (keyRow.users?.is_banned) return res.status(401).json({ success: false, error: 'Account banned' });
+
+            requesterId = keyRow.user_id;
+            // Owner (is_admin=true on user profile) sees all; regular admin_key user is scoped
+            scopeCreatorId = keyRow.users?.is_admin ? null : keyRow.user_id;
+        } else if (ownerId) {
+            // Discord OAuth owner path: verify is_admin flag
+            const { data: userRow } = await sb.from('users')
+                .select('id, is_admin, is_banned').eq('id', ownerId).maybeSingle();
+            if (!userRow || !userRow.is_admin || userRow.is_banned) {
+                return res.status(401).json({ success: false, error: 'Not authorized' });
+            }
+            requesterId = userRow.id;
+            scopeCreatorId = null; // owner sees all
+        } else {
+            return res.status(400).json({ success: false, error: 'Missing admin_key or owner_id' });
+        }
+
+        // Fetch keys with optional scoping
+        let query = sb.from('keys')
+            .select('*, users!keys_user_id_fkey(username, avatar_url)')
+            .order('created_at', { ascending: false })
+            .limit(limit);
+        if (scopeCreatorId) query = query.eq('created_by', scopeCreatorId);
+
+        const { data, error } = await query;
+        if (error) {
+            console.error('list-keys error:', error);
+            return res.status(500).json({ success: false, error: error.message });
+        }
+
+        return res.json({
+            success: true,
+            keys: data || [],
+            scope: scopeCreatorId ? 'own' : 'all',
+            requester_id: requesterId
+        });
+    } catch (err) {
+        console.error('list-keys handler error:', err);
+        return res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// ========================================
 // /api/verify - MAIN LUA LOADER ENDPOINT
 // Called by Lua script with: ?license=NXKS-...&hwid=abc123
 // Returns: script payload (plain text) if authorized, error message if not
