@@ -6,6 +6,10 @@ let currentKey = null;
 let currentProject = null;
 let currentScript = null;
 
+// HWID reset cooldown in hours - keep in sync with dashboard.html modal text
+// and with the Discord bot panel copy.
+const HWID_RESET_COOLDOWN_HOURS = 15;
+
 document.addEventListener("DOMContentLoaded", async () => {
   const loader = document.getElementById("authLoader");
   const main = document.getElementById("dashboardMain");
@@ -37,25 +41,47 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentProfile = await NexaKS.getUserProfile(currentUser.id);
     if (!currentProfile) {
       const meta = currentUser.user_metadata || {};
-      try {
-        const { data } = await NexaKS.supabase
-          .from("users")
-          .insert({
-            id: currentUser.id,
-            discord_id: meta.provider_id || meta.sub || null,
-            username: meta.full_name || meta.name || meta.user_name || "User",
-            avatar_url: meta.avatar_url || null,
-          })
-          .select()
-          .maybeSingle();
-        currentProfile = data;
-      } catch (e) {
-        console.error("Manual profile insert:", e);
+      const discordId = meta.provider_id || meta.sub || null;
+
+      // Race-safe: if a Discord-first row already exists (bot created it earlier),
+      // reuse it instead of inserting a duplicate.
+      if (discordId) {
+        try {
+          const { data: existingByDiscord } = await NexaKS.supabase
+            .from("users")
+            .select("*")
+            .eq("discord_id", discordId)
+            .maybeSingle();
+          if (existingByDiscord) currentProfile = existingByDiscord;
+        } catch (e) {
+          console.error("Discord-id lookup:", e);
+        }
       }
+
+      if (!currentProfile) {
+        try {
+          const { data } = await NexaKS.supabase
+            .from("users")
+            .insert({
+              id: currentUser.id,
+              discord_id: discordId,
+              username:
+                meta.full_name || meta.name || meta.user_name || "User",
+              avatar_url: meta.avatar_url || null,
+            })
+            .select()
+            .maybeSingle();
+          currentProfile = data;
+        } catch (e) {
+          console.error("Manual profile insert:", e);
+        }
+      }
+
       if (!currentProfile) {
         currentProfile = {
           id: currentUser.id,
-          username: meta.full_name || meta.name || meta.user_name || "User",
+          username:
+            meta.full_name || meta.name || meta.user_name || "User",
           avatar_url: meta.avatar_url || null,
           is_admin: false,
         };
@@ -192,8 +218,11 @@ function renderKey() {
 
   const hwid = currentKey.hwid;
   if ($("hwidValue")) {
+    // Short HWIDs (<12 chars) would overlap when sliced, so just show them raw.
     $("hwidValue").textContent = hwid
-      ? hwid.substring(0, 8) + "..." + hwid.substring(hwid.length - 4)
+      ? hwid.length > 12
+        ? hwid.substring(0, 8) + "..." + hwid.substring(hwid.length - 4)
+        : hwid
       : "Not bound yet";
   }
 
@@ -228,6 +257,17 @@ function renderKey() {
         day: "numeric",
         year: "numeric",
       });
+  } else if (currentKey.duration_days) {
+    // Unclaimed-style fallback: duration set but not yet computed to a date.
+    const d = currentKey.duration_days;
+    const label = d + " day" + (d > 1 ? "s" : "");
+    if ($("expiresIn"))
+      $("expiresIn").innerHTML =
+        d +
+        '<span style="font-size:14px;color:var(--text-muted);"> days</span>';
+    if ($("expiresDate"))
+      $("expiresDate").textContent = "Starts on first use";
+    if ($("expiresValue")) $("expiresValue").textContent = label;
   } else {
     if ($("expiresIn")) $("expiresIn").textContent = "Lifetime";
     if ($("expiresDate")) $("expiresDate").textContent = "Never expires";
@@ -247,6 +287,10 @@ function renderKey() {
       Math.max(0, limit - used) + " resets remaining";
   if ($("execCount"))
     $("execCount").textContent = currentKey.execution_count || 0;
+  if ($("execSub"))
+    $("execSub").textContent = currentKey.last_used
+      ? "Last used " + timeAgo(new Date(currentKey.last_used))
+      : "No executions yet";
 
   const plan = currentKey.plan || "free";
   const badge = $("planBadge");
@@ -262,10 +306,13 @@ function renderKey() {
   }
 
   // ---- SHORT LOADER ----
+  // The server (v3+) rejects any key-based load without an &hwid= param, so
+  // every loader we hand out must include the Roblox client id.
   // If the key is attached to a project with a published script, serve
-  // the project loader (keyless = 1 line, key-based = 2 lines).
-  // Otherwise, fall back to the short /api/verify loader.
+  // the project loader; otherwise fall back to /api/verify.
   const origin = window.location.origin;
+  const HWID_SUFFIX =
+    '&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()';
   let loader;
   if (currentProject && currentScript) {
     const base =
@@ -284,7 +331,10 @@ function renderKey() {
         'loadstring(game:HttpGet("' +
         base +
         sep +
-        'key=".._G.script_key))()';
+        'key=".._G.script_key..' +
+        '"' +
+        HWID_SUFFIX +
+        "))()";
     }
   } else {
     loader =
@@ -293,7 +343,10 @@ function renderKey() {
       '"\n' +
       'loadstring(game:HttpGet("' +
       origin +
-      '/api/verify?license=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
+      '/api/verify?license=".._G.script_key..' +
+      '"' +
+      HWID_SUFFIX +
+      "))()";
   }
   if ($("loaderScript")) $("loaderScript").value = loader;
 }
@@ -335,15 +388,24 @@ async function loadActivity() {
         '<tr><td><span class="badge ' +
         cls +
         '">' +
-        log.action +
+        escapeHtml(log.action) +
         "</span></td><td>" +
-        (log.metadata?.message || "-") +
+        escapeHtml(log.metadata?.message || "-") +
         '</td><td style="color:var(--text-muted);">' +
         time +
         "</td></tr>"
       );
     })
     .join("");
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function timeAgo(date) {
@@ -417,22 +479,29 @@ function closeResetModal() {
 }
 
 async function confirmReset() {
-  closeResetModal();
-  showToast("Resetting hardware ID...", "info");
+  if (!currentKey) return showToast("No active license", "error");
 
+  // Enforce cooldown BEFORE closing the modal or showing "resetting"
   if (currentKey.last_hwid_reset) {
-    const hrs = (new Date() - new Date(currentKey.last_hwid_reset)) / 3600000;
-    if (hrs < 24)
+    const hrs =
+      (new Date() - new Date(currentKey.last_hwid_reset)) / 3600000;
+    if (hrs < HWID_RESET_COOLDOWN_HOURS) {
       return showToast(
-        "Cooldown active. Try again in " + Math.ceil(24 - hrs) + "h",
+        "Cooldown active. Try again in " +
+          Math.ceil(HWID_RESET_COOLDOWN_HOURS - hrs) +
+          "h",
         "error",
       );
+    }
   }
   if (
     (currentKey.hwid_reset_count || 0) >= (currentKey.hwid_reset_limit || 5)
   ) {
     return showToast("Reset limit reached", "error");
   }
+
+  closeResetModal();
+  showToast("Resetting hardware ID...", "info");
 
   const { error } = await NexaKS.supabase
     .from("keys")
@@ -487,6 +556,7 @@ async function confirmRedeem() {
   if (existing.user_id && existing.user_id !== currentUser.id)
     return showToast("Key already claimed", "error");
   if (existing.status === "revoked") return showToast("Key revoked", "error");
+  if (existing.status === "expired") return showToast("Key expired", "error");
 
   const updates = { user_id: currentUser.id, status: "active" };
   if (existing.duration_days && !existing.expires_at) {
@@ -500,6 +570,20 @@ async function confirmRedeem() {
     .update(updates)
     .eq("key", key);
   if (error) return showToast("Redeem failed: " + error.message, "error");
+
+  // Promote to admin if the redeemed key is an admin-plan key
+  // (matches the Discord bot's redeem behavior).
+  if (existing.plan === "admin") {
+    try {
+      await NexaKS.supabase
+        .from("users")
+        .update({ is_admin: true })
+        .eq("id", currentUser.id);
+      if (currentProfile) currentProfile.is_admin = true;
+    } catch (e) {
+      console.warn("Admin promotion failed:", e);
+    }
+  }
 
   await NexaKS.supabase.from("logs").insert({
     user_id: currentUser.id,
@@ -517,7 +601,19 @@ async function confirmRedeem() {
 
 async function handleLogout() {
   if (!confirm("Sign out from NexaKS?")) return;
-  await NexaKS.signOut();
+  // Clear the gate.js session BEFORE signing out, so a fast back-nav
+  // doesn't land on a stale-session page.
+  try {
+    localStorage.removeItem("nexaks_session");
+    localStorage.removeItem("nexaks_pending_discord");
+    sessionStorage.removeItem("nexaks_redirected");
+  } catch (_) {}
+  try {
+    if (NexaKS?.signOut) await NexaKS.signOut();
+  } catch (e) {
+    console.warn("signOut:", e);
+  }
+  window.location.href = "/";
 }
 
 document.addEventListener("keydown", (e) => {
@@ -539,7 +635,9 @@ function showToast(message, type) {
   if (!container) return;
   const toast = document.createElement("div");
   toast.className = "toast " + type;
-  toast.innerHTML = "<span>" + message + "</span>";
+  const span = document.createElement("span");
+  span.textContent = message;
+  toast.appendChild(span);
   container.appendChild(toast);
   setTimeout(() => {
     toast.style.animation = "slideIn 0.3s ease reverse";
