@@ -89,8 +89,6 @@ function renderProjectsList() {
     }
     if (empty) empty.style.display = 'none';
 
-    // Build cards with textContent instead of interpolating raw strings into
-    // the onclick attribute â€” avoids any risk of quote-escaping issues.
     grid.innerHTML = '';
     for (const p of projects) {
         const statusCls = p.status === 'active' ? 'badge-success' : p.status === 'paused' ? 'badge-warning' : 'badge';
@@ -166,7 +164,6 @@ async function openProject(id) {
     let candidate = projects.find(p => p.id === id);
     if (!candidate) {
         await loadProjects();
-        // If a newer openProject() was fired while we were fetching, abandon.
         if (myRequestId !== openProjectRequestId) return;
         candidate = projects.find(p => p.id === id);
     }
@@ -186,7 +183,6 @@ async function openProject(id) {
 }
 
 function backToList() {
-    // Invalidate any pending detail-view fetches from the previous project.
     openProjectRequestId++;
     document.getElementById('projectDetailView').style.display = 'none';
     document.getElementById('projectsListView').style.display = 'block';
@@ -201,13 +197,74 @@ function requireActiveProject() {
     return true;
 }
 
+// ---------- File upload for script content ----------
+// Reads the selected .lua / .txt file and drops its text into the target textarea.
+// Mobile-friendly: no clipboard needed, works with Files app on iOS/Android.
+const MAX_SCRIPT_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+const ALLOWED_SCRIPT_EXTS = ['lua', 'txt'];
+
+function handleScriptFileUpload(event, targetTextareaId) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    if (!file) return;
+
+    // Locate the sibling filename display span (matches by convention: <textareaId>FileName -> textareaId+"FileName")
+    // We support two IDs today: scriptContent -> scriptFileName; updateScriptContent -> updateScriptFileName
+    const filenameSpanId = targetTextareaId === 'updateScriptContent' ? 'updateScriptFileName' : 'scriptFileName';
+    const nameEl = document.getElementById(filenameSpanId);
+    const setName = (txt) => { if (nameEl) nameEl.textContent = txt; };
+
+    // Validate extension
+    const parts = file.name.split('.');
+    const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
+    if (!ALLOWED_SCRIPT_EXTS.includes(ext)) {
+        showToast('Only .lua or .txt files are accepted', 'error');
+        input.value = '';
+        setName('');
+        return;
+    }
+
+    // Validate size
+    if (file.size > MAX_SCRIPT_FILE_BYTES) {
+        const mb = (file.size / 1024 / 1024).toFixed(1);
+        showToast('File too large (' + mb + ' MB). Max is 10 MB.', 'error');
+        input.value = '';
+        setName('');
+        return;
+    }
+
+    setName('Reading ' + file.name + '...');
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = String(e.target?.result || '');
+        const target = document.getElementById(targetTextareaId);
+        if (!target) {
+            showToast('Textarea not found', 'error');
+            return;
+        }
+        target.value = text;
+        const sizeKb = (file.size / 1024).toFixed(1);
+        setName(file.name + ' (' + sizeKb + ' KB) loaded');
+        showToast('Loaded ' + file.name, 'success');
+        // Reset the file input so the same file can be re-selected later
+        input.value = '';
+    };
+    reader.onerror = () => {
+        setName('');
+        showToast('Failed to read file', 'error');
+        input.value = '';
+    };
+    reader.readAsText(file);
+}
+
 // ---------- Scripts ----------
 async function loadScripts(requestId) {
     if (!activeProject) return;
     const myId = requestId ?? openProjectRequestId;
     const { data } = await NexaKS.supabase.from('project_scripts')
         .select('*').eq('project_id', activeProject.id).order('updated_at', { ascending: false });
-    if (myId !== openProjectRequestId) return; // stale
+    if (myId !== openProjectRequestId) return;
     const tbody = document.getElementById('scriptsBody');
     if (!tbody) return;
     if (!data || data.length === 0) {
@@ -232,12 +289,10 @@ async function loadScripts(requestId) {
         </tr>`).join('');
 }
 
-// Generate a random load_id with a lower collision chance than Math.random.
 function generateLoadId() {
     if (window.crypto && window.crypto.randomUUID) {
         return window.crypto.randomUUID().replace(/-/g, '').substring(0, 8);
     }
-    // Fallback: 8 hex chars from random bytes
     const arr = new Uint8Array(4);
     (window.crypto || {}).getRandomValues?.(arr);
     return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
@@ -258,6 +313,9 @@ async function addScript() {
     if (error) return showToast('Add script failed: ' + error.message, 'error');
     document.getElementById('scriptContent').value = '';
     document.getElementById('scriptName').value = '';
+    // Reset the upload UI too
+    const nameSpan = document.getElementById('scriptFileName');
+    if (nameSpan) nameSpan.textContent = '';
     showToast('Script saved as draft', 'success');
     await loadScripts();
 }
@@ -288,6 +346,11 @@ function openUpdateScript(scriptId) {
     document.getElementById('updateScriptTitle').textContent = 'Update: ' + s.name;
     document.getElementById('updateScriptVersion').value = bumpVersion(s.version || '1.0.0');
     document.getElementById('updateScriptContent').value = '';
+    // Reset the upload UI so a previous filename doesn't linger
+    const nameSpan = document.getElementById('updateScriptFileName');
+    if (nameSpan) nameSpan.textContent = '';
+    const fileInput = document.getElementById('updateScriptFileInput');
+    if (fileInput) fileInput.value = '';
     document.getElementById('updateModal')?.classList.add('active');
     setTimeout(() => document.getElementById('updateScriptContent')?.focus(), 100);
 }
@@ -296,7 +359,6 @@ function closeUpdateModal() {
     updateScriptId = null;
 }
 function bumpVersion(v) {
-    // 1.0.0 -> 1.0.1. Non-semver strings fall back to a fresh 1.0.1.
     const raw = String(v || '1.0.0').trim();
     if (!/^\d+(\.\d+)*$/.test(raw)) return '1.0.1';
     const parts = raw.split('.').map(x => parseInt(x, 10) || 0);
@@ -510,8 +572,6 @@ async function deleteProject() {
 }
 
 // ---------- Loader modal ----------
-// The server (v3+) rejects any key-based /api/load request without &hwid=,
-// so every loader we hand out must include the Roblox client id.
 function showLoader(scriptId) {
     const s = projScripts.find(x => x.id === scriptId);
     if (!s) return;
@@ -576,8 +636,6 @@ function toggleSidebar() { document.getElementById('sidebar')?.classList.toggle(
 
 async function handleLogout() {
     if (!confirm('Sign out from NexaKS?')) return;
-    // Clear the gate.js session BEFORE signing out so a fast back-nav
-    // doesn't land on a stale-session page.
     try {
         localStorage.removeItem('nexaks_session');
         localStorage.removeItem('nexaks_pending_discord');
@@ -597,7 +655,6 @@ function showToast(message, type) {
     if (!container) return;
     const toast = document.createElement('div');
     toast.className = 'toast ' + type;
-    // textContent so error strings can't inject markup.
     const span = document.createElement('span');
     span.textContent = String(message ?? '');
     toast.appendChild(span);
