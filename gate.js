@@ -16,11 +16,9 @@
   const SESSION_KEY = "nexaks_session";
   const PAGE = (window.NEXAKS_PAGE || document.body?.dataset?.page || guessPage()).toLowerCase();
 
-  // Cloudflare Turnstile SITE key (public â€” safe to expose).
-  // Replace with your own site key. Falls back to Cloudflare's test key so
-  // dev environments still work while you set this up.
+  // Cloudflare Turnstile SITE key (public - safe to expose).
   const TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
-    "0x4AAAAAAD-A8ItQlb_BdoB8"; // Cloudflare Turnstile site key
+    "0x4AAAAAAD-YvdvOI_vA3JJt"; // Cloudflare Turnstile site key
 
   // Pages that require admin key. Dashboard is user-level and needs any valid login.
   const ADMIN_PAGES = ["admin", "projects", "analytics"];
@@ -140,7 +138,7 @@
     const cancel = document.getElementById("nexaks-prompt-cancel");
     const turnstileBox = document.getElementById("nexaks-prompt-turnstile");
 
-    // Render Turnstile widget (async â€” safe to submit once user has a token)
+    // Render Turnstile widget (async - safe to submit once user has a token)
     let turnstileToken = null;
     let turnstileWidgetId = null;
     loadTurnstileScript().then(() => {
@@ -332,7 +330,7 @@
     if (claimsAdmin && usedAdminKey) {
       const ok = await reverifyAdminSession(session);
       if (!ok) {
-        // Demote â€” the key is gone, revoked, expired, or the plan is not admin.
+        // Demote - the key is gone, revoked, expired, or the plan is not admin.
         // Keep any Discord identity but strip admin flags.
         const demoted = Object.assign({}, session, {
           is_admin: false,
@@ -400,16 +398,12 @@
 /* ============================================================
  * NexForge - Sidebar Access Control
  * ------------------------------------------------------------
- * Add this ONE script tag to dashboard.html (BEFORE </body>):
- *
- *   <script src="js/sidebar-guard.js"></script>
- *
  * What it does:
  *   - If user is Discord-only (is_admin: false in DB):
- *       â†’ Hides Projects, Analytics, Bot Commands links in sidebar
- *       â†’ Blocks clicks to those pages (redirects back to dashboard)
+ *       -> Hides Projects, Analytics, Bot Commands links in sidebar
+ *       -> Blocks clicks to those pages (redirects back to dashboard)
  *   - If user is admin (is_admin: true in DB):
- *       â†’ Shows all sidebar links normally
+ *       -> Shows all sidebar links normally
  * ============================================================ */
 
 (function () {
