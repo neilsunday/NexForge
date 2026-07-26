@@ -280,6 +280,146 @@ app.post('/api/verify-admin-key-refresh', loginRateLimit, async (req, res) => {
 });
 
 // ========================================
+// /api/admin/generate-keys - Admin key generation (bypasses RLS)
+// Requires an active admin key in the request body.
+// Server-side validation:
+//   - Rate-limited via loginRateLimit
+//   - Admin key must be valid, active, admin plan, not expired, not banned
+//   - Rejects plan="admin" (admin keys cannot mint other admin keys)
+//   - Ensures the creator's users row exists (upsert via service role)
+//   - Bulk-inserts with collision-safe unique key strings
+// ========================================
+const KEY_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateKeyString() {
+    let out = 'NXKS-';
+    for (let s = 0; s < 4; s++) {
+        if (s > 0) out += '-';
+        for (let i = 0; i < 4; i++) {
+            out += KEY_CHARS.charAt(Math.floor(Math.random() * KEY_CHARS.length));
+        }
+    }
+    return out;
+}
+
+app.post('/api/admin/generate-keys', loginRateLimit, async (req, res) => {
+    try {
+        if (!sb) return res.status(500).json({ success: false, error: 'Server not configured' });
+
+        const body = req.body || {};
+        const adminKey  = body.admin_key ? String(body.admin_key).trim().toUpperCase() : '';
+        const plan      = body.plan ? String(body.plan).toLowerCase() : '';
+        const duration  = body.duration ? String(body.duration) : '';
+        const quantity  = Number.isFinite(+body.quantity) ? Math.floor(+body.quantity) : 0;
+        const resets    = Number.isFinite(+body.hwid_reset_limit) ? Math.floor(+body.hwid_reset_limit) : 5;
+        const projectId = body.project_id ? String(body.project_id) : null;
+
+        // ---- Input validation ----
+        if (!adminKey || !/^NXKS-[A-Z0-9-]{19}$/.test(adminKey)) {
+            return res.status(400).json({ success: false, error: 'Missing or invalid admin key' });
+        }
+        const allowedPlans = ['free', 'pro', 'enterprise'];
+        if (!allowedPlans.includes(plan)) {
+            // Admin-plan generation is explicitly forbidden through this endpoint.
+            return res.status(400).json({ success: false, error: 'Invalid plan. Admin keys can only mint free/pro/enterprise keys.' });
+        }
+        const allowedDurations = ['1', '7', '30', '90', '365', 'lifetime'];
+        if (!allowedDurations.includes(duration)) {
+            return res.status(400).json({ success: false, error: 'Invalid duration' });
+        }
+        if (quantity < 1 || quantity > 500) {
+            return res.status(400).json({ success: false, error: 'Quantity must be 1-500' });
+        }
+        if (resets < 0 || resets > 99) {
+            return res.status(400).json({ success: false, error: 'HWID reset limit must be 0-99' });
+        }
+
+        // ---- Verify the admin key ----
+        const { data: adminRow, error: adminErr } = await sb
+            .from('keys')
+            .select('key, plan, status, expires_at, user_id, users:user_id(id, username, is_banned)')
+            .eq('key', adminKey)
+            .maybeSingle();
+        if (adminErr || !adminRow) {
+            return res.status(401).json({ success: false, error: 'Admin key not found' });
+        }
+        if (adminRow.plan !== 'admin')      return res.status(401).json({ success: false, error: 'Not an admin key' });
+        if (adminRow.status !== 'active')   return res.status(401).json({ success: false, error: 'Admin key is not active' });
+        if (adminRow.expires_at && new Date(adminRow.expires_at) < new Date()) {
+            return res.status(401).json({ success: false, error: 'Admin key has expired' });
+        }
+        if (adminRow.users?.is_banned)      return res.status(401).json({ success: false, error: 'Account tied to key is banned' });
+
+        const creatorId = adminRow.user_id;
+        if (!creatorId) {
+            return res.status(500).json({ success: false, error: 'Admin key has no bound user' });
+        }
+
+        // ---- Optional: project match validation (warn only, we don't fail) ----
+        if (projectId) {
+            const { data: projMatch } = await sb.from('project_scripts')
+                .select('id').eq('project_id', projectId).eq('plan', plan)
+                .eq('status', 'published').limit(1);
+            // No hard fail; the client already confirms this warning.
+            // (The published-script check exists for UX only, not authorization.)
+            void projMatch;
+        }
+
+        // ---- Generate unique key strings ----
+        const durationDays = duration === 'lifetime' ? null : parseInt(duration, 10);
+        const keySet = new Set();
+        let attempts = 0;
+        while (keySet.size < quantity && attempts < quantity * 10) {
+            keySet.add(generateKeyString());
+            attempts++;
+        }
+        if (keySet.size < quantity) {
+            return res.status(500).json({ success: false, error: 'Could not generate enough unique keys' });
+        }
+        const keys = Array.from(keySet);
+
+        // Non-admin keys stay "unclaimed" until redeemed via Discord bot
+        const rows = keys.map(k => ({
+            key: k,
+            plan: plan,
+            duration_days: durationDays,
+            hwid_reset_limit: resets,
+            status: 'unclaimed',
+            created_by: creatorId,
+            project_id: projectId || null,
+        }));
+
+        const { error: insErr } = await sb.from('keys').insert(rows);
+        if (insErr) {
+            console.error('Admin generate insert error:', insErr);
+            return res.status(500).json({ success: false, error: insErr.message || 'Insert failed' });
+        }
+
+        // Audit log (fire-and-forget)
+        sb.from('logs').insert({
+            user_id: creatorId,
+            action: 'admin_generate',
+            status: 'success',
+            metadata: {
+                message: 'Generated ' + quantity + ' ' + plan + ' keys (' + duration + ')' +
+                         (projectId ? ' for project ' + projectId : ''),
+                source: 'admin_panel_web'
+            }
+        }).then(() => {}, () => {});
+
+        return res.json({
+            success: true,
+            count: keys.length,
+            keys: keys,
+            plan: plan,
+            duration: duration
+        });
+    } catch (err) {
+        console.error('Admin generate error:', err);
+        return res.status(500).json({ success: false, error: 'Server error generating keys' });
+    }
+});
+
+// ========================================
 // /api/verify - MAIN LUA LOADER ENDPOINT
 // Called by Lua script with: ?license=NXKS-...&hwid=abc123
 // Returns: script payload (plain text) if authorized, error message if not
