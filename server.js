@@ -443,12 +443,13 @@ async function logProject(projectId, userId, key, action, status, message, ip) {
 // ========================================
 // /api/load/:slug - PUBLIC KEYLESS / KEY LOADER
 // Keyless scripts run without a key. Key-based scripts require ?key=NXKS-...
-// Usage: loadstring(game:HttpGet(".../api/load/myproject?script=abcd1234"))()
+// Usage: loadstring(game:HttpGet(".../api/load/myproject?script=abcd1234&key=NXKS-...&hwid=..."))()
 // ========================================
 app.get('/api/load/:slug', rateLimit, async (req, res) => {
     const slug = (req.params.slug || '').trim().toLowerCase();
     const loadId = req.query.script ? String(req.query.script).trim() : null;
     const key = req.query.key ? String(req.query.key).trim().toUpperCase() : null;
+    const rawHwid = req.query.hwid ? String(req.query.hwid).trim().substring(0, 128) : null;
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
 
     if (!sb) {
@@ -498,10 +499,21 @@ app.get('/api/load/:slug', rateLimit, async (req, res) => {
             return res.status(200).type('text/plain').send('error("NexaKS: Key not valid for this project")');
         }
 
-        // Blacklist check
+        // Check expiration (auto-mark expired if past deadline)
+        if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
+            await sb.from('keys').update({ status: 'expired' }).eq('key', key);
+            await logProject(script.project_id, keyRow.user_id, key, 'load_fail', 'failed', 'Key expired', clientIp);
+            return res.status(200).type('text/plain').send(
+                'error("NexaKS: License expired on ' +
+                new Date(keyRow.expires_at).toLocaleDateString() + '")'
+            );
+        }
+
+        // Blacklist check (hwid / ip / user)
         const { data: bans } = await sb.from('project_blacklist')
             .select('type,value').eq('project_id', script.project_id);
         const blocked = (bans || []).some(b =>
+            (b.type === 'hwid' && rawHwid && b.value === rawHwid) ||
             (b.type === 'ip' && b.value === clientIp) ||
             (b.type === 'user' && b.value === keyRow.user_id)
         );
@@ -510,6 +522,43 @@ app.get('/api/load/:slug', rateLimit, async (req, res) => {
             return res.status(200).type('text/plain').send('error("NexaKS: Access denied - blacklisted")');
         }
 
+        // ========== HWID BINDING + TRACKING ==========
+        // First execution binds the HWID. Later executions must match.
+        // (Same behavior as /api/verify so the dashboard shows correct info.)
+        if (rawHwid) {
+            if (!keyRow.hwid) {
+                // First execution - bind HWID
+                await sb.from('keys').update({
+                    hwid: rawHwid,
+                    execution_count: (keyRow.execution_count || 0) + 1,
+                    last_used: new Date().toISOString()
+                }).eq('key', key);
+                await logProject(script.project_id, keyRow.user_id, key, 'load_bind', 'success',
+                    'HWID bound: ' + rawHwid.substring(0, 12), clientIp);
+            } else if (keyRow.hwid !== rawHwid) {
+                // HWID mismatch - different device
+                await logProject(script.project_id, keyRow.user_id, key, 'load_fail', 'warning',
+                    'HWID mismatch: got ' + rawHwid.substring(0, 12) +
+                    ', expected ' + keyRow.hwid.substring(0, 12), clientIp);
+                return res.status(200).type('text/plain').send(
+                    'error("NexaKS: Hardware ID mismatch. Use /resethwid on Discord to migrate to this device.")'
+                );
+            } else {
+                // Same HWID - normal execution
+                await sb.from('keys').update({
+                    execution_count: (keyRow.execution_count || 0) + 1,
+                    last_used: new Date().toISOString()
+                }).eq('key', key);
+            }
+        } else {
+            // Loader didn't send an HWID at all - track execution only
+            await sb.from('keys').update({
+                execution_count: (keyRow.execution_count || 0) + 1,
+                last_used: new Date().toISOString()
+            }).eq('key', key);
+        }
+
+        // Increment project script executions + log success
         sb.from('project_scripts').update({
             execution_count: (script.execution_count || 0) + 1
         }).eq('id', script.id).then(() => {}, () => {});
