@@ -6,6 +6,10 @@ let projects = [];
 let activeProject = null;
 let projScripts = [];
 
+// Bumped every time openProject() is called so a stale in-flight fetch
+// from a previously-opened project can't overwrite the current view.
+let openProjectRequestId = 0;
+
 document.addEventListener('DOMContentLoaded', async () => {
     const loader = document.getElementById('authLoader');
     const main = document.getElementById('projectsMain');
@@ -85,23 +89,30 @@ function renderProjectsList() {
     }
     if (empty) empty.style.display = 'none';
 
-    grid.innerHTML = projects.map(p => {
+    // Build cards with textContent instead of interpolating raw strings into
+    // the onclick attribute â€” avoids any risk of quote-escaping issues.
+    grid.innerHTML = '';
+    for (const p of projects) {
         const statusCls = p.status === 'active' ? 'badge-success' : p.status === 'paused' ? 'badge-warning' : 'badge';
-        return `
-        <div class="card project-card" onclick="openProject('${p.id}')" style="cursor:pointer;">
+        const card = document.createElement('div');
+        card.className = 'card project-card';
+        card.style.cursor = 'pointer';
+        card.dataset.projectId = p.id;
+        card.innerHTML = `
             <div class="card-header">
                 <div>
                     <div class="card-title">${escapeHtml(p.name)}</div>
                     <div class="card-desc">${escapeHtml(p.description || 'No description')}</div>
                 </div>
-                <span class="badge ${statusCls}">${p.status}</span>
+                <span class="badge ${statusCls}">${escapeHtml(p.status)}</span>
             </div>
             <div class="info-grid" style="margin-top:12px;">
                 <div class="info-item"><div class="info-label">Slug</div><div class="info-value" style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(p.slug)}</div></div>
                 <div class="info-item"><div class="info-label">Version</div><div class="info-value">${escapeHtml(p.version || '1.0.0')}</div></div>
-            </div>
-        </div>`;
-    }).join('');
+            </div>`;
+        card.addEventListener('click', () => openProject(p.id));
+        grid.appendChild(card);
+    }
 }
 
 // ---------- Create project ----------
@@ -114,7 +125,10 @@ function closeCreateModal() {
     ['projName', 'projSlug', 'projDesc'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
 }
 
+let createInFlight = false;
 async function confirmCreate() {
+    if (createInFlight) return;
+
     const name = document.getElementById('projName')?.value.trim();
     let slug = document.getElementById('projSlug')?.value.trim().toLowerCase();
     const desc = document.getElementById('projDesc')?.value.trim();
@@ -123,28 +137,42 @@ async function confirmCreate() {
     if (!slug) slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     if (!/^[a-z0-9-]{2,40}$/.test(slug)) return showToast('Slug must be 2-40 chars: a-z, 0-9, dashes', 'error');
 
+    createInFlight = true;
     closeCreateModal();
     showToast('Creating project...', 'info');
 
-    const { data, error } = await NexaKS.supabase.from('projects').insert({
-        owner_id: projUser.id,
-        name, slug, description: desc || null
-    }).select().maybeSingle();
+    try {
+        const { data, error } = await NexaKS.supabase.from('projects').insert({
+            owner_id: projUser.id,
+            name, slug, description: desc || null
+        }).select().maybeSingle();
 
-    if (error) {
-        if (error.code === '23505') return showToast('That slug is already taken', 'error');
-        return showToast('Create failed: ' + error.message, 'error');
+        if (error) {
+            if (error.code === '23505') return showToast('That slug is already taken', 'error');
+            return showToast('Create failed: ' + error.message, 'error');
+        }
+        showToast('Project created', 'success');
+        await loadProjects();
+        if (data) openProject(data.id);
+    } finally {
+        createInFlight = false;
     }
-    showToast('Project created', 'success');
-    await loadProjects();
-    if (data) openProject(data.id);
 }
 
 // ---------- Project detail ----------
 async function openProject(id) {
-    activeProject = projects.find(p => p.id === id);
-    if (!activeProject) { await loadProjects(); activeProject = projects.find(p => p.id === id); }
-    if (!activeProject) return;
+    const myRequestId = ++openProjectRequestId;
+
+    let candidate = projects.find(p => p.id === id);
+    if (!candidate) {
+        await loadProjects();
+        // If a newer openProject() was fired while we were fetching, abandon.
+        if (myRequestId !== openProjectRequestId) return;
+        candidate = projects.find(p => p.id === id);
+    }
+    if (!candidate) return;
+
+    activeProject = candidate;
 
     document.getElementById('projectsListView').style.display = 'none';
     document.getElementById('projectDetailView').style.display = 'block';
@@ -154,32 +182,46 @@ async function openProject(id) {
     document.getElementById('detailStatus').textContent = activeProject.status;
     document.getElementById('detailStatus').className = 'badge ' + (activeProject.status === 'active' ? 'badge-success' : 'badge-warning');
 
-    await Promise.all([loadScripts(), loadBlacklist(), loadWhitelist(), loadProjectLogs()]);
+    await Promise.all([loadScripts(myRequestId), loadBlacklist(myRequestId), loadWhitelist(myRequestId), loadProjectLogs(myRequestId)]);
 }
 
 function backToList() {
+    // Invalidate any pending detail-view fetches from the previous project.
+    openProjectRequestId++;
     document.getElementById('projectDetailView').style.display = 'none';
     document.getElementById('projectsListView').style.display = 'block';
     activeProject = null;
 }
 
+function requireActiveProject() {
+    if (!activeProject) {
+        showToast('No project selected', 'error');
+        return false;
+    }
+    return true;
+}
+
 // ---------- Scripts ----------
-async function loadScripts() {
+async function loadScripts(requestId) {
+    if (!activeProject) return;
+    const myId = requestId ?? openProjectRequestId;
     const { data } = await NexaKS.supabase.from('project_scripts')
         .select('*').eq('project_id', activeProject.id).order('updated_at', { ascending: false });
+    if (myId !== openProjectRequestId) return; // stale
     const tbody = document.getElementById('scriptsBody');
     if (!tbody) return;
     if (!data || data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">No scripts yet</td></tr>';
+        projScripts = [];
         return;
     }
     projScripts = data;
     tbody.innerHTML = data.map(s => `
         <tr>
             <td>${escapeHtml(s.name)} ${s.keyless ? '<span class="badge badge-info" style="font-size:10px;">KEYLESS</span>' : ''}</td>
-            <td><span class="badge badge-info">${s.plan}</span></td>
+            <td><span class="badge badge-info">${escapeHtml(s.plan)}</span></td>
             <td>${escapeHtml(s.version || '-')}</td>
-            <td><span class="badge ${s.status === 'published' ? 'badge-success' : 'badge-warning'}">${s.status}</span></td>
+            <td><span class="badge ${s.status === 'published' ? 'badge-success' : 'badge-warning'}">${escapeHtml(s.status)}</span></td>
             <td>
                 <button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" onclick="showLoader('${s.id}')">Loader</button>
                 <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="openUpdateScript('${s.id}')">Update</button>
@@ -190,14 +232,26 @@ async function loadScripts() {
         </tr>`).join('');
 }
 
+// Generate a random load_id with a lower collision chance than Math.random.
+function generateLoadId() {
+    if (window.crypto && window.crypto.randomUUID) {
+        return window.crypto.randomUUID().replace(/-/g, '').substring(0, 8);
+    }
+    // Fallback: 8 hex chars from random bytes
+    const arr = new Uint8Array(4);
+    (window.crypto || {}).getRandomValues?.(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function addScript() {
+    if (!requireActiveProject()) return;
     const name = document.getElementById('scriptName')?.value.trim() || 'Main Script';
     const plan = document.getElementById('scriptPlan')?.value || 'free';
     const content = document.getElementById('scriptContent')?.value;
     if (!content || !content.trim()) return showToast('Script content is empty', 'error');
 
     const keyless = document.getElementById('scriptKeyless')?.checked || false;
-    const load_id = Math.random().toString(36).substring(2, 10);
+    const load_id = generateLoadId();
     const { error } = await NexaKS.supabase.from('project_scripts').insert({
         project_id: activeProject.id, name, plan, script_content: content, keyless, load_id
     });
@@ -242,8 +296,10 @@ function closeUpdateModal() {
     updateScriptId = null;
 }
 function bumpVersion(v) {
-    // 1.0.0 -> 1.0.1
-    const parts = String(v || '1.0.0').split('.').map(x => parseInt(x) || 0);
+    // 1.0.0 -> 1.0.1. Non-semver strings fall back to a fresh 1.0.1.
+    const raw = String(v || '1.0.0').trim();
+    if (!/^\d+(\.\d+)*$/.test(raw)) return '1.0.1';
+    const parts = raw.split('.').map(x => parseInt(x, 10) || 0);
     while (parts.length < 3) parts.push(0);
     parts[parts.length - 1]++;
     return parts.join('.');
@@ -300,15 +356,19 @@ async function loadHistory() {
         return;
     }
     if (body) {
-        body.innerHTML = historyVersions.map(v => `
+        body.innerHTML = historyVersions.map(v => {
+            const saved = v.saved_at ? new Date(v.saved_at) : null;
+            const savedText = (saved && !isNaN(saved)) ? saved.toLocaleString() : '-';
+            return `
             <tr>
                 <td>${escapeHtml(v.version || '-')}</td>
-                <td style="color:var(--text-muted);">${new Date(v.saved_at).toLocaleString()}</td>
+                <td style="color:var(--text-muted);">${escapeHtml(savedText)}</td>
                 <td>${v.script_content ? v.script_content.length : 0} chars</td>
                 <td>
                     <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="restoreVersion('${v.id}')">Restore</button>
                 </td>
-            </tr>`).join('');
+            </tr>`;
+        }).join('');
     }
 }
 
@@ -332,13 +392,17 @@ async function restoreVersion(versionId) {
 }
 
 // ---------- Blacklist ----------
-async function loadBlacklist() {
+async function loadBlacklist(requestId) {
+    if (!activeProject) return;
+    const myId = requestId ?? openProjectRequestId;
     const { data } = await NexaKS.supabase.from('project_blacklist')
         .select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false });
+    if (myId !== openProjectRequestId) return;
     renderEntries('blacklistBody', data, 'blacklist');
 }
 
 async function addBlacklist() {
+    if (!requireActiveProject()) return;
     const type = document.getElementById('blType')?.value || 'hwid';
     const value = document.getElementById('blValue')?.value.trim();
     const reason = document.getElementById('blReason')?.value.trim();
@@ -354,13 +418,17 @@ async function addBlacklist() {
 }
 
 // ---------- Whitelist ----------
-async function loadWhitelist() {
+async function loadWhitelist(requestId) {
+    if (!activeProject) return;
+    const myId = requestId ?? openProjectRequestId;
     const { data } = await NexaKS.supabase.from('project_whitelist')
         .select('*').eq('project_id', activeProject.id).order('created_at', { ascending: false });
+    if (myId !== openProjectRequestId) return;
     renderEntries('whitelistBody', data, 'whitelist');
 }
 
 async function addWhitelist() {
+    if (!requireActiveProject()) return;
     const type = document.getElementById('wlType')?.value || 'hwid';
     const value = document.getElementById('wlValue')?.value.trim();
     if (!value) return showToast('Value is required', 'error');
@@ -382,10 +450,10 @@ function renderEntries(tbodyId, data, kind) {
     }
     tbody.innerHTML = data.map(e => `
         <tr>
-            <td><span class="badge badge-info">${e.type}</span></td>
+            <td><span class="badge badge-info">${escapeHtml(e.type)}</span></td>
             <td style="font-family:'JetBrains Mono',monospace;font-size:12px;">${escapeHtml(e.value)}</td>
             <td>${escapeHtml(e.reason || e.note || '-')}</td>
-            <td><button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="deleteEntry('${kind}','${e.id}')">Remove</button></td>
+            <td><button class="btn btn-ghost" style="padding:4px 10px;font-size:12px;" onclick="deleteEntry('${escapeHtml(kind)}','${escapeHtml(e.id)}')">Remove</button></td>
         </tr>`).join('');
 }
 
@@ -398,10 +466,13 @@ async function deleteEntry(kind, id) {
 }
 
 // ---------- Project logs ----------
-async function loadProjectLogs() {
+async function loadProjectLogs(requestId) {
+    if (!activeProject) return;
+    const myId = requestId ?? openProjectRequestId;
     const { data } = await NexaKS.supabase.from('project_logs')
         .select('*').eq('project_id', activeProject.id)
         .order('created_at', { ascending: false }).limit(20);
+    if (myId !== openProjectRequestId) return;
     const tbody = document.getElementById('projLogsBody');
     if (!tbody) return;
     if (!data || data.length === 0) {
@@ -410,12 +481,13 @@ async function loadProjectLogs() {
     }
     tbody.innerHTML = data.map(log => {
         const cls = log.status === 'success' ? 'badge-success' : log.status === 'failed' ? 'badge-danger' : log.status === 'warning' ? 'badge-warning' : 'badge-info';
-        return `<tr><td><span class="badge ${cls}">${log.action}</span></td><td>${escapeHtml(log.metadata?.message || '-')}</td><td style="color:var(--text-muted);">${timeAgo(new Date(log.created_at))}</td></tr>`;
+        return `<tr><td><span class="badge ${cls}">${escapeHtml(log.action)}</span></td><td>${escapeHtml(log.metadata?.message || '-')}</td><td style="color:var(--text-muted);">${timeAgo(new Date(log.created_at))}</td></tr>`;
     }).join('');
 }
 
 // ---------- Danger zone ----------
 async function toggleProjectStatus() {
+    if (!requireActiveProject()) return;
     const next = activeProject.status === 'active' ? 'paused' : 'active';
     const { error } = await NexaKS.supabase.from('projects')
         .update({ status: next, updated_at: new Date().toISOString() }).eq('id', activeProject.id);
@@ -428,6 +500,7 @@ async function toggleProjectStatus() {
 }
 
 async function deleteProject() {
+    if (!requireActiveProject()) return;
     if (!confirm('Delete "' + activeProject.name + '"? This removes its scripts, lists and logs. This cannot be undone.')) return;
     const { error } = await NexaKS.supabase.from('projects').delete().eq('id', activeProject.id);
     if (error) return showToast('Delete failed: ' + error.message, 'error');
@@ -437,10 +510,13 @@ async function deleteProject() {
 }
 
 // ---------- Loader modal ----------
+// The server (v3+) rejects any key-based /api/load request without &hwid=,
+// so every loader we hand out must include the Roblox client id.
 function showLoader(scriptId) {
     const s = projScripts.find(x => x.id === scriptId);
     if (!s) return;
     if (s.status !== 'published') return showToast('Publish the script first to get its loader', 'error');
+    if (!requireActiveProject()) return;
 
     const site = window.location.origin;
     const slug = activeProject.slug;
@@ -450,8 +526,9 @@ function showLoader(scriptId) {
         code = 'loadstring(game:HttpGet("' + site + '/api/load/' + slug + loadParam + '"))()';
     } else {
         const sep = loadParam ? '&' : '?';
-        code = '_G.script_key = "NXKS-XXXX-XXXX-XXXX-XXXX" -- replace with your key\n' +
-               'loadstring(game:HttpGet("' + site + '/api/load/' + slug + loadParam + sep + 'key=".._G.script_key))()';
+        code = '_G.script_key = "YOUR_KEY_HERE" -- replace with your key\n' +
+               'loadstring(game:HttpGet("' + site + '/api/load/' + slug + loadParam + sep +
+               'key=".._G.script_key.."&hwid="..game:GetService("RbxAnalyticsService"):GetClientId()))()';
     }
     document.getElementById('loaderCode').value = code;
     document.getElementById('loaderModal')?.classList.add('active');
@@ -465,13 +542,13 @@ function copyLoaderCode() {
 
 // ---------- Discord command modal ----------
 function showDiscord() {
-    if (!activeProject) return;
+    if (!requireActiveProject()) return;
     const cmds = [
         '// Post the panel in a Discord channel:',
         '/setup-panel project:' + activeProject.slug,
         '',
         '// Generate keys tied to this project:',
-        '/generate plan:pro duration:30 quantity:1 project:' + activeProject.slug
+        '/key create plan:pro duration:30 quantity:1 project:' + activeProject.slug
     ].join('\n');
     document.getElementById('discordCode').value = cmds;
     document.getElementById('discordModal')?.classList.add('active');
@@ -488,6 +565,7 @@ function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function timeAgo(date) {
+    if (!(date instanceof Date) || isNaN(date)) return '-';
     const s = Math.floor((new Date() - date) / 1000);
     if (s < 60) return 'Just now';
     if (s < 3600) return Math.floor(s / 60) + ' mins ago';
@@ -495,7 +573,23 @@ function timeAgo(date) {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 function toggleSidebar() { document.getElementById('sidebar')?.classList.toggle('open'); }
-async function handleLogout() { if (confirm('Sign out from NexaKS?')) await NexaKS.signOut(); }
+
+async function handleLogout() {
+    if (!confirm('Sign out from NexaKS?')) return;
+    // Clear the gate.js session BEFORE signing out so a fast back-nav
+    // doesn't land on a stale-session page.
+    try {
+        localStorage.removeItem('nexaks_session');
+        localStorage.removeItem('nexaks_pending_discord');
+        sessionStorage.removeItem('nexaks_redirected');
+    } catch (_) {}
+    try {
+        if (NexaKS?.signOut) await NexaKS.signOut();
+    } catch (e) {
+        console.warn('signOut:', e);
+    }
+    window.location.href = '/';
+}
 
 function showToast(message, type) {
     type = type || 'info';
@@ -503,7 +597,10 @@ function showToast(message, type) {
     if (!container) return;
     const toast = document.createElement('div');
     toast.className = 'toast ' + type;
-    toast.innerHTML = '<span>' + message + '</span>';
+    // textContent so error strings can't inject markup.
+    const span = document.createElement('span');
+    span.textContent = String(message ?? '');
+    toast.appendChild(span);
     container.appendChild(toast);
     setTimeout(() => {
         toast.style.animation = 'slideIn 0.3s ease reverse';
@@ -511,4 +608,12 @@ function showToast(message, type) {
     }, 3500);
 }
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeCreateModal(); closeDiscordModal(); closeUpdateModal(); closeHistoryModal(); } });
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeCreateModal();
+        closeDiscordModal();
+        closeUpdateModal();
+        closeHistoryModal();
+        closeLoaderModal();
+    }
+});
