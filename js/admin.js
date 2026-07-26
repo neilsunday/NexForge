@@ -723,31 +723,21 @@ async function generateKeys() {
       if (keySet.size < qty) throw new Error("Could not generate " + qty + " unique keys");
       generatedKeys = Array.from(keySet);
 
-      // Admin-plan keys auto-activate (bound to creator, ready to use)
-      const isAdminPlan = plan === "admin";
+      // All keys (including admin) are minted as UNCLAIMED / unbound so they can
+      // be handed out. The recipient claims the key on first use:
+      //   - admin keys: via the /api/verify-admin-key modal (marks active)
+      //   - other plans: via /redeem on Discord (binds to Discord user)
       const durationDays = duration === "lifetime" ? null : parseInt(duration);
 
-      const rows = generatedKeys.map((key) => {
-        const row = {
-          key: key,
-          plan: plan,
-          duration_days: durationDays,
-          hwid_reset_limit: resets,
-          status: isAdminPlan ? "active" : "unclaimed",
-          created_by: adminId,
-          project_id: projectId || null,
-        };
-        if (isAdminPlan) {
-          row.user_id = adminId;
-          row.redeemed_via = "admin_panel";
-          if (durationDays) {
-            const exp = new Date();
-            exp.setDate(exp.getDate() + durationDays);
-            row.expires_at = exp.toISOString();
-          }
-        }
-        return row;
-      });
+      const rows = generatedKeys.map((key) => ({
+        key: key,
+        plan: plan,
+        duration_days: durationDays,
+        hwid_reset_limit: resets,
+        status: "unclaimed",
+        created_by: adminId,
+        project_id: projectId || null,
+      }));
 
       const { error } = await NexaKS.supabase.from("keys").insert(rows);
       if (error) {
