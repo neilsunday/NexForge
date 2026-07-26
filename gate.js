@@ -255,30 +255,45 @@
     return null;
   }
 
+  // Retry profile lookup with a small backoff since RLS/session may not be
+  // fully settled on the very first attempt after OAuth callback.
+  async function getProfileResilient(userId) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const profile = await window.NexaKS.getUserProfile(userId);
+        if (profile) return profile;
+      } catch (e) {
+        console.warn("[gate] profile lookup attempt " + (attempt + 1) + " failed:", e);
+      }
+      await new Promise(r => setTimeout(r, 400));
+    }
+    return null;
+  }
+
   async function boot() {
     const nexaReady = await waitForNexaKS();
+    console.log("[gate] nexaReady:", nexaReady);
 
     // ---- Step 1: read whatever's in localStorage ----
     let session = readSession();
+    console.log("[gate] existing session:", session);
 
     // ---- Step 2: fold in Discord OAuth if there's an active one ----
     if (nexaReady) {
       const discordUser = await getDiscordUserResilient();
-      if (discordUser) {
-        // Fetch profile for is_admin flag
-        let isAdmin = false;
-        let username = discordUser.user_metadata?.full_name ||
-                       discordUser.user_metadata?.name || "User";
-        try {
-          const profile = await window.NexaKS.getUserProfile(discordUser.id);
-          if (profile) {
-            isAdmin = !!profile.is_admin;
-            if (profile.username) username = profile.username;
-          }
-        } catch (_) {}
+      console.log("[gate] discord user:", discordUser?.id);
 
-        // Detect "account switch": the existing session belongs to a different user.
-        // If so, drop all admin-key claims (they belonged to the previous user).
+      if (discordUser) {
+        // Fetch profile for is_admin flag (with retry)
+        const profile = await getProfileResilient(discordUser.id);
+        console.log("[gate] profile:", profile);
+
+        const isAdminFromDb = !!profile?.is_admin;
+        const username = profile?.username ||
+                         discordUser.user_metadata?.full_name ||
+                         discordUser.user_metadata?.name || "User";
+
+        // Detect "account switch": existing session belongs to a different user.
         const previousUserId = session?.user_id;
         const isAccountSwitch = previousUserId && previousUserId !== discordUser.id;
 
@@ -286,30 +301,31 @@
           String(session.login_method).includes("admin_key");
         const inheritAdminKey = wasAdminKey && session?.is_admin && session?.key;
 
+        // Preserve the existing admin-key credentials BEFORE overwriting session
+        const preservedKey = inheritAdminKey ? session.key : null;
+
         session = {
           user_id: discordUser.id,
           username: username,
-          // Only the DB profile determines is_admin for the Discord identity.
-          // An admin-key claim can bump it up, but only if the admin key was
-          // redeemed BY THIS SAME USER (not carried over from a different account).
-          is_admin: isAdmin || !!inheritAdminKey,
+          is_admin: isAdminFromDb || !!inheritAdminKey,
           login_method: inheritAdminKey ? "discord+admin_key" : "discord",
           expires_at: Date.now() + 7 * 24 * 3600 * 1000
         };
-        // Preserve admin_key credentials only if they still belong to this user.
-        if (inheritAdminKey) {
-          session.key = session.key || (readSession() || {}).key;
+        if (inheritAdminKey && preservedKey) {
+          session.key = preservedKey;
           session.plan = "admin";
         }
-        try {
-          localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-        } catch (_) {}
+
+        // ALWAYS save - no try/catch swallowing so bugs surface in console
+        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
         localStorage.removeItem("nexaks_pending_discord");
+        console.log("[gate] session saved. is_admin:", session.is_admin);
       }
     }
 
     // ---- Step 3: no session at all => login page ----
     if (!session) {
+      console.log("[gate] no session, redirecting to login");
       redirect("/login.html");
       return;
     }
