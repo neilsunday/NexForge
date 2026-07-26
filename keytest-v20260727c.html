@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Key Endpoint Test</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 20px; background: #0f0f11; color: #e5e7eb; }
+  h1 { font-size: 20px; margin-bottom: 20px; }
+  button { padding: 14px 20px; font-size: 16px; background: #7c3aed; color: #fff; border: none; border-radius: 8px; cursor: pointer; width: 100%; margin-bottom: 10px; font-weight: 600; }
+  button:disabled { opacity: 0.5; }
+  #result { background: #1a1a1e; border: 1px solid #2a2a2f; border-radius: 8px; padding: 16px; margin-top: 20px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; min-height: 100px; }
+  .label { font-weight: 600; color: #9ca3af; margin-top: 12px; }
+  input { width: 100%; padding: 12px; background: #0f0f11; border: 1px solid #3a3a3f; border-radius: 8px; color: #fff; font-family: monospace; font-size: 14px; box-sizing: border-box; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<h1>Admin Key Endpoint Test</h1>
+<div class="label">Key to test:</div>
+<input id="key" value="NXKS-DCMG-QL27-LGT3-Z7JZ">
+
+<button onclick="test1()">Test 1: /api/verify-admin-key</button>
+<button onclick="test2()">Test 2: /api/verify-admin-key-refresh</button>
+<button onclick="test3()">Test 3: /api/health</button>
+
+<div id="result">Results will appear here...</div>
+
+<script>
+const out = document.getElementById('result');
+const keyIn = document.getElementById('key');
+
+function show(label, obj) {
+  out.textContent = label + '\n\nStatus: ' + obj.status + '\nContent-Type: ' + obj.contentType + '\n\nBody:\n' + obj.body;
+}
+function showErr(label, e) {
+  out.textContent = label + '\n\nERROR: ' + e.message;
+}
+
+async function callApi(url, body) {
+  const opts = { method: body ? 'POST' : 'GET' };
+  if (body) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, opts);
+  const txt = await res.text();
+  return {
+    status: res.status,
+    contentType: res.headers.get('content-type') || '',
+    body: txt.slice(0, 800)
+  };
+}
+
+async function test1() {
+  out.textContent = 'Testing /api/verify-admin-key ...';
+  try {
+    const r = await callApi('/api/verify-admin-key', {
+      key: keyIn.value.trim().toUpperCase(),
+      token: 'test-not-real'
+    });
+    show('TEST 1: /api/verify-admin-key (with fake captcha)', r);
+  } catch(e) { showErr('TEST 1', e); }
+}
+
+async function test2() {
+  out.textContent = 'Testing /api/verify-admin-key-refresh ...';
+  try {
+    const r = await callApi('/api/verify-admin-key-refresh', {
+      key: keyIn.value.trim().toUpperCase()
+    });
+    show('TEST 2: /api/verify-admin-key-refresh', r);
+  } catch(e) { showErr('TEST 2', e); }
+}
+
+async function test3() {
+  out.textContent = 'Testing /api/health ...';
+  try {
+    const r = await callApi('/api/health');
+    show('TEST 3: /api/health', r);
+  } catch(e) { showErr('TEST 3', e); }
+}
+</script>
+</body>
+</html>
