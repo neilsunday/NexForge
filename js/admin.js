@@ -19,21 +19,80 @@ document.addEventListener("DOMContentLoaded", async () => {
   }, 8000);
 
   try {
-    // Check auth
-    currentUser = await NexaKS.getCurrentUser();
-    if (!currentUser && !DEV_MODE) {
-      clearTimeout(forceShow);
-      window.location.href = "/";
-      return;
-    }
+    // ---- AUTH CHECK ----
+    // Two supported paths:
+    //   1. Admin-key login (session in localStorage, no Discord OAuth needed)
+    //   2. Discord OAuth session + is_admin flag on the profile row
+    //
+    // The admin-key path is validated server-side by /api/verify-admin-key-refresh
+    // so localStorage tampering can't grant access.
 
-    // Check admin status
-    currentProfile = await NexaKS.getUserProfile(currentUser.id);
-    if (!currentProfile?.is_admin) {
-      clearTimeout(forceShow);
-      if (loader) loader.style.display = "none";
-      if (denied) denied.style.display = "flex";
-      return;
+    let sessionAdmin = null;
+    try {
+      const raw = localStorage.getItem("nexaks_session");
+      if (raw) sessionAdmin = JSON.parse(raw);
+    } catch (_) {}
+
+    const hasAdminKeySession = sessionAdmin &&
+      sessionAdmin.is_admin === true &&
+      sessionAdmin.login_method &&
+      String(sessionAdmin.login_method).includes("admin_key") &&
+      sessionAdmin.key;
+
+    if (hasAdminKeySession) {
+      // Verify with the server (bypasses RLS via service role)
+      let refreshOk = false;
+      try {
+        const res = await fetch("/api/verify-admin-key-refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: sessionAdmin.key })
+        });
+        const data = await res.json().catch(() => ({}));
+        refreshOk = !!(res.ok && data.success);
+      } catch (_) {}
+
+      if (!refreshOk) {
+        // Session was tampered with or key was revoked/expired
+        localStorage.removeItem("nexaks_session");
+        clearTimeout(forceShow);
+        window.location.href = "/";
+        return;
+      }
+
+      // Build a minimal currentUser + currentProfile from the session
+      currentUser = {
+        id: sessionAdmin.user_id || null,
+        user_metadata: { full_name: sessionAdmin.username || "Admin" }
+      };
+      currentProfile = {
+        id: sessionAdmin.user_id || null,
+        username: sessionAdmin.username || "Admin",
+        avatar_url: null,
+        is_admin: true
+      };
+    } else {
+      // Fall back to the Discord OAuth flow
+      try {
+        currentUser = await NexaKS.getCurrentUser();
+      } catch (_) { currentUser = null; }
+
+      if (!currentUser) {
+        clearTimeout(forceShow);
+        window.location.href = "/";
+        return;
+      }
+
+      try {
+        currentProfile = await NexaKS.getUserProfile(currentUser.id);
+      } catch (_) { currentProfile = null; }
+
+      if (!currentProfile?.is_admin) {
+        clearTimeout(forceShow);
+        if (loader) loader.style.display = "none";
+        if (denied) denied.style.display = "flex";
+        return;
+      }
     }
 
     // User is admin - show panel and load data
@@ -637,34 +696,15 @@ async function generateKeys() {
     }
     const keys = Array.from(keySet);
 
-    // Admin-plan keys are auto-activated so the owner can log in immediately
-    // via the /admin key modal (no Discord redeem step needed).
-    // All other plans stay "unclaimed" until redeemed via /redeem on Discord.
-    const isAdminPlan = plan === "admin";
-    const durationDays = duration === "lifetime" ? null : parseInt(duration);
-
-    const rows = keys.map((key) => {
-      const row = {
-        key: key,
-        plan: plan,
-        duration_days: durationDays,
-        hwid_reset_limit: resets,
-        status: isAdminPlan ? "active" : "unclaimed",
-        created_by: adminId,
-        project_id: projectId || null,
-      };
-      // For admin keys, start the clock immediately + bind to the creator
-      if (isAdminPlan) {
-        row.user_id = adminId;
-        row.redeemed_via = "admin_panel";
-        if (durationDays) {
-          const exp = new Date();
-          exp.setDate(exp.getDate() + durationDays);
-          row.expires_at = exp.toISOString();
-        }
-      }
-      return row;
-    });
+    const rows = keys.map((key) => ({
+      key: key,
+      plan: plan,
+      duration_days: duration === "lifetime" ? null : parseInt(duration),
+      hwid_reset_limit: resets,
+      status: "unclaimed",
+      created_by: adminId,
+      project_id: projectId || null,
+    }));
 
     const { error } = await NexaKS.supabase.from("keys").insert(rows);
     if (error) {
