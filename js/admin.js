@@ -724,8 +724,15 @@ document.addEventListener("click", (e) => {
 });
 
 function showTab(tab) {
+  // Hide EVERY tab section, then show the requested one. Tabs that were
+  // originally always-visible (generate/keys/users/logs/scripts) also get
+  // toggled so only one card is visible at a time.
+  const allTabs = document.querySelectorAll('[id^="tab-"]');
+  allTabs.forEach((el) => { el.style.display = "none"; });
+
   const target = document.getElementById("tab-" + tab);
   if (target) {
+    target.style.display = "";  // reveal (revert to CSS default)
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     target.style.transition = "box-shadow 0.3s";
     target.style.boxShadow = "0 0 0 2px var(--accent)";
@@ -733,10 +740,14 @@ function showTab(tab) {
   }
   document.getElementById("sidebar")?.classList.remove("open");
 
+  // Highlight the active sidebar link
+  document.querySelectorAll(".sidebar-nav a").forEach((a) => a.classList.remove("active"));
+  const activeLink = document.querySelector('.sidebar-nav a[onclick*="showTab(\'' + tab + '\')"]');
+  if (activeLink) activeLink.classList.add("active");
+
   // If entering the notifications tab, clear the unread badge
   if (tab === "notifications") {
     clearNotifBadge();
-    // Refresh stats on tab open (cheap query)
     if (typeof loadNotifStats === "function") loadNotifStats();
   }
   // If entering the sessions tab, refresh the data
@@ -1509,7 +1520,7 @@ function showNotifToast(title, username, message) {
   titleEl.textContent = title;
   const bodyEl = document.createElement("div");
   bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
-  bodyEl.textContent = username + (message ? " â€” " + message : "");
+  bodyEl.textContent = username + (message ? " Ã¢â‚¬â€ " + message : "");
   toast.appendChild(titleEl);
   toast.appendChild(bodyEl);
   container.appendChild(toast);
