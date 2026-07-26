@@ -4,7 +4,7 @@
  * It enforces:
  *   - No session at all           -> redirect to /login.html
  *   - Discord OAuth session only  -> allow dashboard only, hide/block admin nav
- *   - Admin key session           -> full access (re-verified against DB)
+ *   - Admin key session           -> full access (re-verified against server)
  *
  * Set window.NEXAKS_PAGE = "dashboard" | "admin" | "projects" | "analytics"
  * BEFORE loading this script (or add data-page="..." to <body>).
@@ -56,23 +56,19 @@
     window.location.replace(url);
   }
 
-  // Re-verify an admin_key session against the DB so localStorage tampering
-  // cannot grant admin access. Returns true if the key is still a valid,
-  // active admin key. Returns false and clears the session otherwise.
+  // Re-verify an admin_key session against the server so localStorage tampering
+  // cannot grant admin access, AND so RLS blocks don't cause false demotions.
+  // The server uses the service role to bypass RLS on the keys table.
   async function reverifyAdminSession(session) {
     if (!session || !session.key) return false;
-    if (!window.NexaKS?.supabase) return false;
     try {
-      const { data: keyRow, error } = await NexaKS.supabase
-        .from("keys")
-        .select("key, plan, status, expires_at, users:user_id(is_banned)")
-        .eq("key", session.key).maybeSingle();
-      if (error || !keyRow) return false;
-      if (keyRow.plan !== "admin") return false;
-      if (keyRow.status !== "active") return false;
-      if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) return false;
-      if (keyRow.users?.is_banned) return false;
-      return true;
+      const res = await fetch("/api/verify-admin-key-refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: session.key })
+      });
+      const data = await res.json().catch(() => ({}));
+      return !!(res.ok && data.success);
     } catch (_) {
       return false;
     }
@@ -186,34 +182,25 @@
       submit.textContent = "Verifying...";
 
       try {
-        // 1. Verify the captcha with the server FIRST.
-        const captchaOk = await verifyTurnstileToken(turnstileToken);
-        if (!captchaOk) throw new Error("Captcha verification failed. Please try again.");
-
-        if (!window.NexaKS?.supabase) {
-          throw new Error("Supabase client not loaded on this page.");
+        // Single server-side call: verifies captcha + looks up key with service role.
+        // Bypasses RLS on the keys table so unclaimed/anon-blocked admin keys work.
+        const res = await fetch("/api/verify-admin-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: key, token: turnstileToken })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Verification failed.");
         }
-        // 2. Look up the key.
-        const { data: keyRow, error } = await NexaKS.supabase
-          .from("keys")
-          .select("key, plan, status, expires_at, user_id, users:user_id(id, username, is_banned)")
-          .eq("key", key).maybeSingle();
-
-        if (error) throw new Error(error.message);
-        if (!keyRow) throw new Error("Key not found.");
-        if (keyRow.plan !== "admin") throw new Error("This is not an admin key.");
-        if (keyRow.status === "revoked") throw new Error("This admin key has been revoked.");
-        if (keyRow.status === "expired") throw new Error("This admin key has expired.");
-        if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) throw new Error("This admin key expired.");
-        if (keyRow.users?.is_banned) throw new Error("The account tied to this key is banned.");
 
         // Merge admin credentials into existing session (or create fresh)
         const existing = readSession() || {};
         const session = Object.assign({}, existing, {
-          key: keyRow.key,
+          key: data.session.key,
           plan: "admin",
-          user_id: keyRow.user_id || existing.user_id || null,
-          username: keyRow.users?.username || existing.username || "Admin",
+          user_id: data.session.user_id || existing.user_id || null,
+          username: data.session.username || existing.username || "Admin",
           is_admin: true,
           login_method: existing.login_method === "discord" ? "discord+admin_key" : "admin_key",
           expires_at: Date.now() + 7 * 24 * 3600 * 1000
@@ -221,8 +208,8 @@
         localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 
         overlay.remove();
-        // Reload so the page picks up admin access
-        window.location.reload();
+        // Send them straight to the admin panel after successful login
+        window.location.href = "/admin.html";
       } catch (ex) {
         err.textContent = ex.message || "Verification failed.";
         err.style.display = "block";
