@@ -274,19 +274,30 @@
           }
         } catch (_) {}
 
-        // Merge into or create the session. Existing admin-key claims survive.
-        const wasAdminKey = session?.login_method &&
-          String(session.login_method).includes("admin_key");
+        // Detect "account switch": the existing session belongs to a different user.
+        // If so, drop all admin-key claims (they belonged to the previous user).
+        const previousUserId = session?.user_id;
+        const isAccountSwitch = previousUserId && previousUserId !== discordUser.id;
 
-        session = Object.assign({}, session || {}, {
+        const wasAdminKey = !isAccountSwitch && session?.login_method &&
+          String(session.login_method).includes("admin_key");
+        const inheritAdminKey = wasAdminKey && session?.is_admin && session?.key;
+
+        session = {
           user_id: discordUser.id,
           username: username,
-          // is_admin becomes true if EITHER the DB profile says so OR the user
-          // already redeemed an admin key in this session.
-          is_admin: isAdmin || !!(wasAdminKey && session.is_admin),
-          login_method: wasAdminKey ? "discord+admin_key" : "discord",
+          // Only the DB profile determines is_admin for the Discord identity.
+          // An admin-key claim can bump it up, but only if the admin key was
+          // redeemed BY THIS SAME USER (not carried over from a different account).
+          is_admin: isAdmin || !!inheritAdminKey,
+          login_method: inheritAdminKey ? "discord+admin_key" : "discord",
           expires_at: Date.now() + 7 * 24 * 3600 * 1000
-        });
+        };
+        // Preserve admin_key credentials only if they still belong to this user.
+        if (inheritAdminKey) {
+          session.key = session.key || (readSession() || {}).key;
+          session.plan = "admin";
+        }
         try {
           localStorage.setItem(SESSION_KEY, JSON.stringify(session));
         } catch (_) {}
