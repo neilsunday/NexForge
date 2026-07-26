@@ -640,13 +640,29 @@ async function generateKeys() {
 
   if (qty < 1 || qty > 500) return showToast("Quantity must be 1-500", "error");
 
-  // Admin-plan minting is forbidden through the web panel. Server enforces this too.
-  if (plan === "admin") {
-    return showToast("Admin keys cannot be generated from the panel. Contact the site owner.", "error");
+  // Detect login mode: admin-key session vs. Discord OAuth (owner).
+  let sessionAdmin = null;
+  try {
+    const raw = localStorage.getItem("nexaks_session");
+    if (raw) sessionAdmin = JSON.parse(raw);
+  } catch (_) {}
+  const isAdminKeyOnly = !!(sessionAdmin && sessionAdmin.login_method &&
+    String(sessionAdmin.login_method) === "admin_key" && sessionAdmin.key);
+
+  // Admin-key sessions can NEVER mint admin-plan keys (only the owner can).
+  if (isAdminKeyOnly && plan === "admin") {
+    return showToast("Admin keys cannot be generated with an admin-key session. Only the site owner can mint admin keys.", "error");
   }
 
-  // Warn on project + plan mismatch (soft check for UX - server does not enforce this)
-  if (projectId) {
+  // Owner mint confirmation for admin-plan keys
+  if (!isAdminKeyOnly && plan === "admin") {
+    if (!confirm("Generate " + qty + " ADMIN key(s)?\n\nThese keys grant full admin access to the website when redeemed. Only issue them to trusted staff.")) {
+      return;
+    }
+  }
+
+  // Soft warning: project has no published script for this plan
+  if (projectId && plan !== "admin") {
     try {
       const { data: matching } = await NexaKS.supabase
         .from("project_scripts")
@@ -668,16 +684,6 @@ async function generateKeys() {
     }
   }
 
-  // The admin key session is required (server verifies it).
-  let sessionAdmin = null;
-  try {
-    const raw = localStorage.getItem("nexaks_session");
-    if (raw) sessionAdmin = JSON.parse(raw);
-  } catch (_) {}
-  if (!sessionAdmin || !sessionAdmin.key) {
-    return showToast("Your admin session is missing. Please log in again.", "error");
-  }
-
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Generating...";
@@ -685,25 +691,83 @@ async function generateKeys() {
   showToast("Generating " + qty + " " + plan.toUpperCase() + " keys...", "info");
 
   try {
-    const res = await fetch("/api/admin/generate-keys", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        admin_key: sessionAdmin.key,
-        plan: plan,
-        duration: duration,
-        quantity: qty,
-        hwid_reset_limit: resets,
-        project_id: projectId || null
-      })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || "Generation failed");
+    let generatedKeys = null;
+
+    if (isAdminKeyOnly) {
+      // ---- ADMIN-KEY PATH: server endpoint (bypasses RLS, forbids admin plan) ----
+      const res = await fetch("/api/admin/generate-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          admin_key: sessionAdmin.key,
+          plan: plan,
+          duration: duration,
+          quantity: qty,
+          hwid_reset_limit: resets,
+          project_id: projectId || null
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || "Generation failed");
+      generatedKeys = data.keys;
+    } else {
+      // ---- OWNER PATH: direct Supabase insert (RLS grants owner via is_admin()) ----
+      const adminId = await resolveAdminUserId();
+
+      const keySet = new Set();
+      let attempts = 0;
+      while (keySet.size < qty && attempts < qty * 10) {
+        keySet.add(generateKeyString());
+        attempts++;
+      }
+      if (keySet.size < qty) throw new Error("Could not generate " + qty + " unique keys");
+      generatedKeys = Array.from(keySet);
+
+      // Admin-plan keys auto-activate (bound to creator, ready to use)
+      const isAdminPlan = plan === "admin";
+      const durationDays = duration === "lifetime" ? null : parseInt(duration);
+
+      const rows = generatedKeys.map((key) => {
+        const row = {
+          key: key,
+          plan: plan,
+          duration_days: durationDays,
+          hwid_reset_limit: resets,
+          status: isAdminPlan ? "active" : "unclaimed",
+          created_by: adminId,
+          project_id: projectId || null,
+        };
+        if (isAdminPlan) {
+          row.user_id = adminId;
+          row.redeemed_via = "admin_panel";
+          if (durationDays) {
+            const exp = new Date();
+            exp.setDate(exp.getDate() + durationDays);
+            row.expires_at = exp.toISOString();
+          }
+        }
+        return row;
+      });
+
+      const { error } = await NexaKS.supabase.from("keys").insert(rows);
+      if (error) {
+        const detail = error.message + (error.details ? " (" + error.details + ")" : "");
+        throw new Error(detail);
+      }
+
+      await NexaKS.supabase.from("logs").insert({
+        user_id: adminId,
+        action: "admin_generate",
+        status: "success",
+        metadata: {
+          message: "Generated " + qty + " " + plan + " keys (" + duration + ")" +
+                   (projectId ? " for project " + projectId : ""),
+        },
+      });
     }
 
-    showToast("Successfully generated " + data.count + " keys!", "success");
-    downloadKeysFile(data.keys, plan, duration);
+    showToast("Successfully generated " + generatedKeys.length + " keys!", "success");
+    downloadKeysFile(generatedKeys, plan, duration);
     await loadKeys();
     await loadStats();
     await loadLogs();
@@ -1773,3 +1837,33 @@ async function loadSessionsStats() {
     console.error("loadSessionsStats:", e);
   }
 }
+
+// ============================================================
+// Hide the "Admin" option from the plan dropdown when the user
+// is logged in with an admin-key session (only the site owner
+// - authenticated through Discord OAuth - can mint admin keys).
+// ============================================================
+document.addEventListener("DOMContentLoaded", () => {
+  try {
+    const raw = localStorage.getItem("nexaks_session");
+    const s = raw ? JSON.parse(raw) : null;
+    const isAdminKeyOnly = !!(s && s.login_method &&
+      String(s.login_method) === "admin_key" && s.key);
+    if (!isAdminKeyOnly) return;
+
+    const applyHide = () => {
+      const sel = document.getElementById("genPlan");
+      if (!sel) return;
+      Array.from(sel.options).forEach((opt) => {
+        if (opt.value === "admin") {
+          opt.remove();
+        }
+      });
+      if (sel.value === "admin") sel.value = "pro";
+    };
+    applyHide();
+    // Re-apply in case the panel re-renders the select later
+    setTimeout(applyHide, 500);
+    setTimeout(applyHide, 2000);
+  } catch (_) {}
+});
