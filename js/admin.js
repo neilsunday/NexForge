@@ -48,7 +48,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       loadLogs(),
       loadScripts(),
       loadProjectsForForm(),
+      loadNotifications(),
+      loadNotifStats(),
     ]);
+
+    // Subscribe to real-time log inserts for the toast + badge system
+    subscribeToLogs();
 
     if (loader) loader.style.display = "none";
     if (main) main.style.display = "grid";
@@ -725,6 +730,13 @@ function showTab(tab) {
     setTimeout(() => (target.style.boxShadow = ""), 1500);
   }
   document.getElementById("sidebar")?.classList.remove("open");
+
+  // If entering the notifications tab, clear the unread badge
+  if (tab === "notifications") {
+    clearNotifBadge();
+    // Refresh stats on tab open (cheap query)
+    if (typeof loadNotifStats === "function") loadNotifStats();
+  }
 }
 
 async function handleLogout() {
@@ -1228,4 +1240,279 @@ async function loadProjectsForForm() {
   } catch (e) {
     console.error("loadProjectsForForm:", e);
   }
+}
+
+
+// ========== Notifications (Activity Feed) ==========
+// The "notifications" tab is a filtered live view of the logs table.
+// We track script executions, HWID resets, and failed attempts.
+
+const NOTIF_PAGE_SIZE = 100;
+let notifOffset = 0;
+let notifFilter = "all";
+let notifCache = []; // rows currently displayed
+let notifUnreadCount = 0;
+let notifChannel = null;
+
+// Action types we care about, grouped by filter
+const NOTIF_ACTIONS = {
+  executions: ["verify", "verify_bind"],
+  resets: ["reset_hwid"],
+  failed: ["verify_fail", "verify_error"],
+};
+NOTIF_ACTIONS.all = [
+  ...NOTIF_ACTIONS.executions,
+  ...NOTIF_ACTIONS.resets,
+  ...NOTIF_ACTIONS.failed,
+];
+
+function actionLabel(action) {
+  if (action === "verify" || action === "verify_bind") return "Script executed";
+  if (action === "reset_hwid") return "HWID reset";
+  if (action === "verify_fail") return "Failed attempt";
+  if (action === "verify_error") return "Server error";
+  return action;
+}
+
+function actionBadgeClass(action) {
+  if (action === "verify" || action === "verify_bind") return "badge-success";
+  if (action === "reset_hwid") return "badge-info";
+  if (action === "verify_fail") return "badge-warning";
+  if (action === "verify_error") return "badge-danger";
+  return "badge";
+}
+
+function escapeHtmlNotif(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+async function loadNotifications(reset = true) {
+  if (reset) {
+    notifOffset = 0;
+    notifCache = [];
+    const tbody = document.getElementById("notifTableBody");
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>';
+  }
+
+  const actions = NOTIF_ACTIONS[notifFilter] || NOTIF_ACTIONS.all;
+  try {
+    const { data, error } = await NexaKS.supabase
+      .from("logs")
+      .select("*, users!logs_user_id_fkey(username)")
+      .in("action", actions)
+      .order("created_at", { ascending: false })
+      .range(notifOffset, notifOffset + NOTIF_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    if (reset) notifCache = data || [];
+    else notifCache = notifCache.concat(data || []);
+
+    notifOffset += NOTIF_PAGE_SIZE;
+    renderNotifications();
+
+    const loadMoreBtn = document.getElementById("notifLoadMore");
+    if (loadMoreBtn) {
+      loadMoreBtn.style.display = (data && data.length === NOTIF_PAGE_SIZE) ? "inline-flex" : "none";
+    }
+  } catch (e) {
+    console.error("loadNotifications:", e);
+    const tbody = document.getElementById("notifTableBody");
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger);padding:32px;">Failed to load: ' + escapeHtmlNotif(e.message) + '</td></tr>';
+  }
+}
+
+function loadMoreNotifications() {
+  loadNotifications(false);
+}
+
+function filterNotifications() {
+  const sel = document.getElementById("notifFilter");
+  notifFilter = sel ? sel.value : "all";
+  loadNotifications(true);
+}
+
+function renderNotifications() {
+  const tbody = document.getElementById("notifTableBody");
+  const desc = document.getElementById("notifDesc");
+  if (!tbody) return;
+
+  if (desc) desc.textContent = "Showing " + notifCache.length + " event" + (notifCache.length === 1 ? "" : "s");
+
+  if (notifCache.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">No activity yet</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = notifCache.map((log) => {
+    const when = timeAgo(new Date(log.created_at));
+    const username = log.users?.username || (log.user_id ? "Unknown" : "Unclaimed");
+    const details = escapeHtmlNotif(log.metadata?.message || log.key || "-");
+    return (
+      "<tr>" +
+      '<td style="color:var(--text-muted);font-size:13px;white-space:nowrap;">' + escapeHtmlNotif(when) + "</td>" +
+      '<td><span class="badge ' + actionBadgeClass(log.action) + '">' + escapeHtmlNotif(actionLabel(log.action)) + "</span></td>" +
+      "<td>" + escapeHtmlNotif(username) + "</td>" +
+      '<td style="color:var(--text-secondary);font-size:13px;">' + details + "</td>" +
+      '<td><button class="icon-btn danger" title="Clear" onclick="clearNotification(\'' + log.id + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></td>' +
+      "</tr>"
+    );
+  }).join("");
+}
+
+async function clearNotification(id) {
+  const { error } = await NexaKS.supabase.from("logs").delete().eq("id", id);
+  if (error) return showToast("Clear failed: " + error.message, "error");
+  notifCache = notifCache.filter((n) => n.id !== id);
+  renderNotifications();
+  await loadNotifStats();
+}
+
+async function clearAllNotifications() {
+  if (!confirm("Delete all notifications in the current view? This cannot be undone.")) return;
+  const actions = NOTIF_ACTIONS[notifFilter] || NOTIF_ACTIONS.all;
+  showToast("Clearing notifications...", "info");
+  const { error } = await NexaKS.supabase
+    .from("logs")
+    .delete()
+    .in("action", actions);
+  if (error) return showToast("Clear failed: " + error.message, "error");
+  notifCache = [];
+  notifOffset = 0;
+  renderNotifications();
+  showToast("All notifications cleared", "success");
+  await loadNotifStats();
+}
+
+// Daily summary stats (executions / resets / failed / unique users today)
+async function loadNotifStats() {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const iso = startOfDay.toISOString();
+
+  try {
+    const [execRes, resetRes, failRes, userRes] = await Promise.all([
+      NexaKS.supabase.from("logs").select("*", { count: "exact", head: true })
+        .in("action", NOTIF_ACTIONS.executions).gte("created_at", iso),
+      NexaKS.supabase.from("logs").select("*", { count: "exact", head: true })
+        .eq("action", "reset_hwid").gte("created_at", iso),
+      NexaKS.supabase.from("logs").select("*", { count: "exact", head: true })
+        .in("action", NOTIF_ACTIONS.failed).gte("created_at", iso),
+      NexaKS.supabase.from("logs").select("user_id")
+        .in("action", NOTIF_ACTIONS.executions).gte("created_at", iso)
+        .not("user_id", "is", null),
+    ]);
+
+    const $ = (id) => document.getElementById(id);
+    if ($("notifStatExecToday")) $("notifStatExecToday").textContent = execRes.count ?? 0;
+    if ($("notifStatResetToday")) $("notifStatResetToday").textContent = resetRes.count ?? 0;
+    if ($("notifStatFailedToday")) $("notifStatFailedToday").textContent = failRes.count ?? 0;
+    const uniqueUsers = new Set((userRes.data || []).map((r) => r.user_id)).size;
+    if ($("notifStatUsersToday")) $("notifStatUsersToday").textContent = uniqueUsers;
+  } catch (e) {
+    console.error("loadNotifStats:", e);
+  }
+}
+
+// Real-time subscription: whenever a new log row is inserted with a tracked
+// action, prepend it to the visible list (if the filter matches), bump the
+// unread badge, and show a toast.
+function subscribeToLogs() {
+  if (!NexaKS.supabase?.channel) return;
+  if (notifChannel) return; // already subscribed
+
+  notifChannel = NexaKS.supabase
+    .channel("admin-activity-feed")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "logs" },
+      async (payload) => {
+        const log = payload.new;
+        if (!log || !NOTIF_ACTIONS.all.includes(log.action)) return;
+
+        // Fetch username since realtime payload doesn't include the join
+        let username = "Unknown";
+        if (log.user_id) {
+          try {
+            const { data: u } = await NexaKS.supabase
+              .from("users").select("username").eq("id", log.user_id).maybeSingle();
+            if (u?.username) username = u.username;
+          } catch (_) {}
+        } else {
+          username = "Unclaimed";
+        }
+        const enriched = { ...log, users: { username } };
+
+        // Prepend to cache if filter allows
+        const actions = NOTIF_ACTIONS[notifFilter] || NOTIF_ACTIONS.all;
+        if (actions.includes(log.action)) {
+          notifCache.unshift(enriched);
+          if (notifCache.length > NOTIF_PAGE_SIZE * 3) notifCache.pop();
+          renderNotifications();
+        }
+
+        // Toast (only if not currently viewing the notifications tab)
+        const tab = document.getElementById("tab-notifications");
+        const isViewingNotifs = tab && tab.getBoundingClientRect().top > -100 && tab.getBoundingClientRect().top < window.innerHeight / 2;
+        if (!isViewingNotifs) {
+          bumpNotifBadge();
+          showNotifToast(actionLabel(log.action), username, log.metadata?.message || "");
+        }
+
+        // Refresh stats
+        loadNotifStats();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "DELETE", schema: "public", table: "logs" },
+      (payload) => {
+        const id = payload.old?.id;
+        if (!id) return;
+        notifCache = notifCache.filter((n) => n.id !== id);
+        renderNotifications();
+      }
+    )
+    .subscribe();
+}
+
+function bumpNotifBadge() {
+  notifUnreadCount++;
+  const badge = document.getElementById("notifBadge");
+  if (!badge) return;
+  badge.textContent = notifUnreadCount > 99 ? "99+" : notifUnreadCount;
+  badge.style.display = "inline-block";
+}
+
+function clearNotifBadge() {
+  notifUnreadCount = 0;
+  const badge = document.getElementById("notifBadge");
+  if (badge) badge.style.display = "none";
+}
+
+function showNotifToast(title, username, message) {
+  const container = document.getElementById("notifToastContainer");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.style.cssText = "background:#1a1a1e;border:1px solid #2a2a2f;border-left:3px solid #7c3aed;border-radius:10px;padding:12px 14px;color:#e5e7eb;font-family:'Inter',sans-serif;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,0.35);pointer-events:auto;opacity:0;transform:translateX(20px);transition:opacity 0.25s ease,transform 0.25s ease;";
+  const titleEl = document.createElement("div");
+  titleEl.style.cssText = "font-weight:700;margin-bottom:4px;color:#fff;";
+  titleEl.textContent = title;
+  const bodyEl = document.createElement("div");
+  bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
+  bodyEl.textContent = username + (message ? " â€” " + message : "");
+  toast.appendChild(titleEl);
+  toast.appendChild(bodyEl);
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateX(0)";
+  });
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(20px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 4500);
 }
