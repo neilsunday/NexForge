@@ -188,6 +188,9 @@
 
   function isAdminNavItem(a) {
     if (!a || a.classList.contains("logo")) return false;
+    // Preferred: explicit marker (works even for anchors we don't recognize)
+    if (a.getAttribute("data-adminonly") === "true") return true;
+    // Legacy fallback: match by href/onclick
     const href = (a.getAttribute("href") || "").toLowerCase();
     const onclick = (a.getAttribute("onclick") || "").toLowerCase();
     for (const pat of ADMIN_ONLY_HREF_PATTERNS) if (href.includes(pat)) return true;
