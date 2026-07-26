@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Gate.js Live Trace</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { font-family: system-ui, sans-serif; padding: 20px; background: #0f0f11; color: #e5e7eb; }
+pre { background: #1a1a1e; border: 1px solid #2a2a2f; border-radius: 8px; padding: 12px; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+h2 { font-size: 15px; margin-top: 20px; color: #a78bfa; }
+.ok { color: #10b981; } .fail { color: #ef4444; } .warn { color: #f59e0b; }
+</style>
+</head>
+<body>
+<h1>Gate.js Live Trace</h1>
+<p style="color:#9ca3af;font-size:13px;">Traces exactly what gate.js's boot() sees. Run this while logged in.</p>
+
+<h2>1. localStorage 'nexaks_session':</h2>
+<pre id="ls">loading...</pre>
+
+<h2>2. Discord OAuth user (via NexaKS.getCurrentUser):</h2>
+<pre id="du">loading...</pre>
+
+<h2>3. Profile lookup (via NexaKS.getUserProfile):</h2>
+<pre id="pr">loading...</pre>
+
+<h2>4. What gate.js SHOULD write to nexaks_session:</h2>
+<pre id="expect">loading...</pre>
+
+<h2>5. Sidebar visibility test — simulated:</h2>
+<pre id="sim">loading...</pre>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase.js"></script>
+<script>
+(async () => {
+  const el = (id) => document.getElementById(id);
+  
+  // 1. Existing localStorage
+  el('ls').textContent = localStorage.getItem('nexaks_session') || '(none)';
+  
+  // Wait for NexaKS
+  for (let i = 0; i < 30 && !window.NexaKS; i++) await new Promise(r => setTimeout(r, 100));
+  if (!window.NexaKS) { el('du').textContent = 'NexaKS never loaded'; return; }
+  
+  // 2. Discord user
+  let user = null;
+  try {
+    user = await window.NexaKS.getCurrentUser();
+    el('du').textContent = user ? JSON.stringify({
+      id: user.id,
+      email: user.email,
+      metadata_full_name: user.user_metadata?.full_name,
+      metadata_provider_id: user.user_metadata?.provider_id
+    }, null, 2) : '(null - no Discord session detected)';
+  } catch (e) { el('du').textContent = 'ERROR: ' + e.message; return; }
+  
+  if (!user) return;
+  
+  // 3. Profile
+  let profile = null;
+  try {
+    profile = await window.NexaKS.getUserProfile(user.id);
+    el('pr').textContent = profile ? JSON.stringify(profile, null, 2) : '(null - profile not found for user.id)';
+  } catch (e) { el('pr').textContent = 'ERROR: ' + e.message; }
+  
+  // 4. Expected session
+  const isAdmin = !!profile?.is_admin;
+  const username = profile?.username || user.user_metadata?.full_name || 'User';
+  const expected = {
+    user_id: user.id,
+    username: username,
+    is_admin: isAdmin,
+    login_method: 'discord',
+    expires_at: Date.now() + 7 * 24 * 3600 * 1000
+  };
+  el('expect').textContent = JSON.stringify(expected, null, 2);
+  
+  // 5. Simulate what gate.js would do
+  const shouldHideAdmin = !isAdmin;
+  el('sim').innerHTML = shouldHideAdmin
+    ? '<span class="ok">✓ SHOULD HIDE admin nav (regular user)</span>'
+    : '<span class="warn">⚠ Would show admin nav (is_admin=true)</span>';
+})();
+</script>
+</body>
+</html>
