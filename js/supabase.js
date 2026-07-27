@@ -1,6 +1,6 @@
-/* NexaKS - Supabase Client (loop-proof) */
+/* Keyora - Supabase Client (with role detection) */
 
-const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
+const SUPABASE_URL = '[miscyjgmvxbshvtiecuu.supabase.co](https://miscyjgmvxbshvtiecuu.supabase.co)';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -12,11 +12,13 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     }
 });
 
+// ==================== AUTH ====================
+
 async function signInWithDiscord() {
     const { error } = await sb.auth.signInWithOAuth({
         provider: 'discord',
         options: {
-            redirectTo: window.location.origin + '/dashboard',
+            redirectTo: window.location.origin + '/dashboard.html',
             scopes: 'identify email'
         }
     });
@@ -27,16 +29,21 @@ async function signInWithDiscord() {
 }
 
 async function signOut() {
-    // Mark current session as expired before signing out
     try { await expireCurrentSession(); } catch (_) {}
+    try {
+        localStorage.removeItem('keyora_session');
+        localStorage.removeItem('nexaks_session'); // legacy cleanup
+        localStorage.removeItem('nexaks_pending_discord');
+        sessionStorage.removeItem('nexaks_redirected');
+    } catch (_) {}
     await sb.auth.signOut();
     window.location.href = '/';
 }
 
 async function getSessionSafely() {
     const hasAuthHash = window.location.hash &&
-                       (window.location.hash.includes('access_token') ||
-                        window.location.hash.includes('error'));
+        (window.location.hash.includes('access_token') ||
+         window.location.hash.includes('error'));
 
     let { data: { session } } = await sb.auth.getSession();
     if (session) {
@@ -47,12 +54,13 @@ async function getSessionSafely() {
     }
     if (!hasAuthHash) return null;
 
+    // Wait up to 5s for OAuth callback to settle
     return new Promise((resolve) => {
         let resolved = false;
         const timeout = setTimeout(() => {
             if (resolved) return;
             resolved = true;
-            try { subscription?.unsubscribe(); } catch (e) {}
+            try { subscription?.unsubscribe(); } catch (_) {}
             resolve(null);
         }, 5000);
 
@@ -60,7 +68,7 @@ async function getSessionSafely() {
             if (session && !resolved) {
                 resolved = true;
                 clearTimeout(timeout);
-                try { subscription?.unsubscribe(); } catch (e) {}
+                try { subscription?.unsubscribe(); } catch (_) {}
                 if (window.history?.replaceState) {
                     window.history.replaceState({}, '', window.location.pathname);
                 }
@@ -89,18 +97,53 @@ async function getUserProfile(userId) {
     }
 }
 
+// ==================== ROLE DETECTION ====================
+// Three tiers:
+//   'owner' - is_admin=true in DB (only the first user gets this via SQL trigger)
+//   'admin' - regular Discord user + has valid admin-key session in localStorage
+//   'user'  - regular Discord user, no admin key
+//   null    - not logged in
+
+async function getUserRole() {
+    const user = await getCurrentUser();
+    if (!user) return null;
+
+    const profile = await getUserProfile(user.id);
+
+    // Owner check - is_admin flag in DB (set by SQL trigger for first user only)
+    if (profile?.is_admin === true) return 'owner';
+
+    // Admin-client check - has a valid admin-key session in localStorage
+    try {
+        const raw = localStorage.getItem('keyora_session');
+        if (raw) {
+            const s = JSON.parse(raw);
+            if (s?.admin_key && s?.expires_at && Date.now() < s.expires_at) {
+                return 'admin';
+            }
+        }
+    } catch (_) {}
+
+    return 'user';
+}
+
+async function isOwner() {
+    return (await getUserRole()) === 'owner';
+}
+
+async function isAdminOrOwner() {
+    const role = await getUserRole();
+    return role === 'owner' || role === 'admin';
+}
+
 // ==================== SESSION TRACKING ====================
-// One row per login in user_sessions. We store the row's ID in localStorage
-// so we can bump last_active_at on every page and mark it expired on logout.
 
-const SESSION_ROW_KEY = 'nexaks_session_row_id';
-const HEARTBEAT_INTERVAL_MS = 60_000; // 1 min
+const SESSION_ROW_KEY = 'keyora_session_row_id';
+const HEARTBEAT_INTERVAL_MS = 60_000;
 
-// Fetch approximate geolocation from a free API (ip-api.com over HTTPS).
-// Returns { country, city, ip } or an empty object on failure. Never throws.
 async function fetchGeoInfo() {
     try {
-        const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
+        const res = await fetch('[ipapi.co](https://ipapi.co/json/)', { cache: 'no-store' });
         if (!res.ok) return {};
         const data = await res.json();
         return {
@@ -108,16 +151,12 @@ async function fetchGeoInfo() {
             city: data.city || null,
             ip: data.ip || null,
         };
-    } catch (_) {
-        return {};
-    }
+    } catch (_) { return {}; }
 }
 
-// Called once on successful login. Skips silently if the row already exists.
 async function trackLoginSession(user, loginMethod) {
     if (!user?.id) return;
     try {
-        // Avoid duplicate rows if the page reloads within the same login
         const existing = localStorage.getItem(SESSION_ROW_KEY);
         if (existing) return;
 
@@ -144,15 +183,12 @@ async function trackLoginSession(user, loginMethod) {
             console.warn('Session log insert failed:', error.message);
             return;
         }
-        if (data?.id) {
-            localStorage.setItem(SESSION_ROW_KEY, data.id);
-        }
+        if (data?.id) localStorage.setItem(SESSION_ROW_KEY, data.id);
     } catch (e) {
         console.warn('trackLoginSession:', e);
     }
 }
 
-// Bump last_active_at every minute while the tab is open.
 let _heartbeatTimer = null;
 function startSessionHeartbeat() {
     if (_heartbeatTimer) return;
@@ -178,16 +214,14 @@ async function expireCurrentSession() {
     localStorage.removeItem(SESSION_ROW_KEY);
 }
 
-// Auto-run: whenever the client loads, check for a live session and log it once.
-// Also start the heartbeat so we know when users are actually active.
+// Auto-run on client load
 (async function autoTrackSession() {
     try {
         const user = await getCurrentUser();
         if (!user) return;
-        // Detect login method from the gate.js session shape (falls back to 'discord')
         let loginMethod = 'discord';
         try {
-            const raw = localStorage.getItem('nexaks_session');
+            const raw = localStorage.getItem('keyora_session');
             if (raw) {
                 const s = JSON.parse(raw);
                 if (s?.login_method) loginMethod = s.login_method;
@@ -198,13 +232,21 @@ async function expireCurrentSession() {
     } catch (_) {}
 })();
 
-window.NexaKS = {
+// ==================== EXPORT ====================
+
+window.Keyora = {
     supabase: sb,
     signInWithDiscord,
     signOut,
     getCurrentUser,
     getUserProfile,
     getSessionSafely,
+    getUserRole,
+    isOwner,
+    isAdminOrOwner,
     trackLoginSession,
     expireCurrentSession,
 };
+
+// Backwards compat alias for old code that references NexaKS
+window.NexaKS = window.Keyora;
