@@ -234,6 +234,8 @@ async function expireCurrentSession() {
 
 // ==================== EXPORT ====================
 
+// ==================== EXPORT ====================
+
 window.Keyora = {
     supabase: sb,
     signInWithDiscord,
@@ -248,5 +250,8 @@ window.Keyora = {
     expireCurrentSession,
 };
 
-// Backwards compat alias for old code that references NexaKS
+// Backwards compat: expose as NexaKS AND as bare globals
 window.NexaKS = window.Keyora;
+window.signInWithDiscord = signInWithDiscord;
+window.signOut = signOut;
+window.handleLogin = signInWithDiscord;
