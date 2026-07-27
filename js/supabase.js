@@ -1,6 +1,6 @@
 /* Keyora - Supabase Client (with role detection) */
 
-const SUPABASE_URL = '[miscyjgmvxbshvtiecuu.supabase.co](https://miscyjgmvxbshvtiecuu.supabase.co)';
+const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -143,7 +143,7 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 
 async function fetchGeoInfo() {
     try {
-        const res = await fetch('[ipapi.co](https://ipapi.co/json/)', { cache: 'no-store' });
+        const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
         if (!res.ok) return {};
         const data = await res.json();
         return {
