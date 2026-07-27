@@ -307,6 +307,104 @@ app.post('/api/verify-admin-key-refresh', loginRateLimit, async (req, res) => {
 });
 
 // ========================================
+// /api/bind-admin-key - Bind an unclaimed admin key to a Discord user
+// Called by dashboard.js after Discord OAuth completes when there's a
+// pending admin key in localStorage (Fix A flow).
+// Uses service role to bypass RLS on the keys table.
+// Safety: only binds if the key is admin plan, active/unclaimed, and unbound.
+// ========================================
+app.post('/api/bind-admin-key', loginRateLimit, async (req, res) => {
+    try {
+        if (!sb) return res.status(500).json({ success: false, error: 'Server not configured' });
+
+        const key = (req.body && req.body.key) ? String(req.body.key).trim().toUpperCase() : '';
+        const userId = (req.body && req.body.user_id) ? String(req.body.user_id).trim() : '';
+
+        if (!key || !/^NXKS-[A-Z0-9-]{19}$/.test(key)) {
+            return res.status(400).json({ success: false, error: 'Invalid key format' });
+        }
+        if (!userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+            return res.status(400).json({ success: false, error: 'Invalid user ID' });
+        }
+
+        // Look up the key with service role (bypasses RLS)
+        const { data: keyRow, error: lookupError } = await sb
+            .from('keys')
+            .select('key, plan, status, user_id, expires_at, duration_days')
+            .eq('key', key)
+            .maybeSingle();
+
+        if (lookupError) {
+            console.error('Bind admin key lookup error:', lookupError);
+            return res.status(500).json({ success: false, error: 'Database error' });
+        }
+
+        if (!keyRow) return res.status(404).json({ success: false, error: 'Key not found' });
+        if (keyRow.plan !== 'admin') return res.status(400).json({ success: false, error: 'Not an admin key' });
+        if (keyRow.status === 'revoked') return res.status(400).json({ success: false, error: 'Key revoked' });
+        if (keyRow.status === 'expired') return res.status(400).json({ success: false, error: 'Key expired' });
+
+        // Already bound to this same user â€” treat as success (idempotent)
+        if (keyRow.user_id && keyRow.user_id === userId) {
+            return res.json({ success: true, already_bound: true });
+        }
+        // Already bound to a different user â€” reject
+        if (keyRow.user_id && keyRow.user_id !== userId) {
+            return res.status(409).json({ success: false, error: 'Key already claimed by another user' });
+        }
+
+        // Verify the Discord user exists in auth.users (via users table)
+        const { data: userRow, error: userError } = await sb
+            .from('users')
+            .select('id, is_banned')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (userError) {
+            console.error('Bind admin key user lookup error:', userError);
+            return res.status(500).json({ success: false, error: 'Database error' });
+        }
+        if (!userRow) return res.status(404).json({ success: false, error: 'User not found â€” please complete Discord login first' });
+        if (userRow.is_banned) return res.status(403).json({ success: false, error: 'User is banned' });
+
+        // Compute expires_at if not set and duration_days is set
+        const update = { user_id: userId, status: 'active' };
+        if (!keyRow.expires_at && keyRow.duration_days && Number.isFinite(+keyRow.duration_days)) {
+            const exp = new Date();
+            exp.setDate(exp.getDate() + parseInt(keyRow.duration_days, 10));
+            update.expires_at = exp.toISOString();
+        }
+
+        // Bind the key
+        const { error: bindError } = await sb
+            .from('keys')
+            .update(update)
+            .eq('key', key);
+
+        if (bindError) {
+            console.error('Bind admin key update error:', bindError);
+            return res.status(500).json({ success: false, error: 'Failed to bind key' });
+        }
+
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+
+        // Audit log (fire-and-forget)
+        sb.from('logs').insert({
+            user_id: userId,
+            key: key,
+            action: 'admin_key_bind',
+            status: 'success',
+            metadata: { message: 'Admin key bound via Discord OAuth callback', ip: clientIp }
+        }).then(() => {}, () => {});
+
+        return res.json({ success: true });
+    } catch (err) {
+        console.error('Bind admin key error:', err);
+        return res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// ========================================
 // /api/admin/generate-keys - Admin key generation (bypasses RLS)
 // Requires an active admin key in the request body.
 // Server-side validation:
