@@ -1929,10 +1929,10 @@ document.addEventListener("DOMContentLoaded", () => {
 // This runs client-side; the server endpoints already scope by created_by / owner_id.
 function applyAdminTierUiHiding() {
   const OWNER_ONLY_SECTION_IDS = [
-    "section-users",         // Users management (all users)
-    "section-logs",          // System logs (all events)
-    "section-notifications", // Notifications (system-wide)
-    "section-sessions",      // Active sessions (all users)
+    "tab-users",           // Users management (all users)
+    "tab-logs",            // Audit Logs (all events)
+    "tab-notifications",   // Notifications (system-wide)
+    "tab-sessions",        // Active sessions (all users)
   ];
   const OWNER_ONLY_SIDEBAR_ACTIONS = [
     "showSection('users')",
