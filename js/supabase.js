@@ -1,4 +1,4 @@
-/* Keyora - Supabase Client (v5 - DB-only, no localStorage sessions) */
+/* Keyora - Supabase Client (v6 - handles multiple active admin keys) */
 
 const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
@@ -15,7 +15,6 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // ==================== AUTH ====================
 
 async function signInWithDiscord() {
-    // Nuke any stale admin-key session before OAuth (prevents role confusion after account switch)
     try {
         localStorage.removeItem('keyora_session');
         localStorage.removeItem('nexaks_session');
@@ -41,6 +40,7 @@ async function signOut() {
         localStorage.removeItem('keyora_session');
         localStorage.removeItem('nexaks_session');
         localStorage.removeItem('nexaks_pending_discord');
+        localStorage.removeItem('nexaks_pending_admin_key');
         localStorage.removeItem('keyora_session_row_id');
         sessionStorage.removeItem('nexaks_redirected');
     } catch (_) {}
@@ -104,7 +104,6 @@ async function getUserProfile(userId) {
     }
 }
 
-// Retry-enabled profile fetch â€” critical for role detection on slow mobile networks
 async function getUserProfileResilient(userId, maxAttempts = 5) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
@@ -121,20 +120,29 @@ async function getUserProfileResilient(userId, maxAttempts = 5) {
     return null;
 }
 
-// Check if user has an active admin key in the DB (no localStorage involved)
+// v6 FIX: Handle multiple active admin keys (users can have more than one).
+// Uses .limit(1) instead of .maybeSingle() which throws on multi-row results.
 async function hasActiveAdminKey(userId) {
     if (!userId) return false;
     try {
-        const { data } = await sb
+        const { data, error } = await sb
             .from('keys')
             .select('key, plan, status, expires_at')
             .eq('user_id', userId)
             .eq('plan', 'admin')
             .eq('status', 'active')
-            .maybeSingle();
-        if (!data) return false;
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        if (error) {
+            console.warn('[Keyora] admin key check error:', error.message);
+            return false;
+        }
+        if (!data || data.length === 0) return false;
+
+        const key = data[0];
         // Check expiry
-        if (data.expires_at && new Date(data.expires_at) < new Date()) return false;
+        if (key.expires_at && new Date(key.expires_at) < new Date()) return false;
         return true;
     } catch (e) {
         console.warn('[Keyora] admin key check failed:', e);
@@ -156,21 +164,18 @@ async function getUserRole() {
         return null;
     }
 
-    // Step 1: Check owner status via users table (retries for slow networks)
     const profile = await getUserProfileResilient(user.id);
     if (profile?.is_admin === true) {
         console.log('[Keyora] role: owner');
         return 'owner';
     }
 
-    // Step 2: Check for active admin key bound to this user
     const isAdmin = await hasActiveAdminKey(user.id);
     if (isAdmin) {
         console.log('[Keyora] role: admin');
         return 'admin';
     }
 
-    // Step 3: Regular Discord user
     console.log('[Keyora] role: user');
     return 'user';
 }
@@ -262,11 +267,8 @@ async function expireCurrentSession() {
     localStorage.removeItem(SESSION_ROW_KEY);
 }
 
-// Auto-run on client load â€” track login + start heartbeat
-// Also nuke any stale admin-key session (v4 legacy) since we're now DB-only
 (async function autoTrackSession() {
     try {
-        // Nuke legacy admin-key sessions â€” role is DB-driven now
         try {
             localStorage.removeItem('keyora_session');
             localStorage.removeItem('nexaks_session');
@@ -298,7 +300,6 @@ window.Keyora = {
     expireCurrentSession,
 };
 
-// Backwards compat: expose as NexaKS AND as bare globals
 window.NexaKS = window.Keyora;
 window.signInWithDiscord = signInWithDiscord;
 window.signOut = signOut;
