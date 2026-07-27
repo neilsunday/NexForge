@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const main = document.getElementById("adminMain");
   const denied = document.getElementById("deniedState");
 
-  // Longer safety timeout â€” 15s to accommodate slow mobile networks
+  // Longer safety timeout Ã¢â‚¬â€ 15s to accommodate slow mobile networks
   const forceShow = setTimeout(() => {
     if (loader) loader.style.display = "none";
     if (denied) denied.style.display = "flex";
@@ -20,7 +20,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     // ---- WAIT FOR AUTH CLIENT ----
     // The auth client (Keyora, alias NexaKS) is loaded by supabase.js.
-    // On slow mobile networks it may take a few seconds â€” wait up to 8s.
+    // On slow mobile networks it may take a few seconds Ã¢â‚¬â€ wait up to 8s.
     let client = null;
     for (let i = 0; i < 80; i++) {
       if (window.Keyora?.getUserRole) { client = window.Keyora; break; }
@@ -38,10 +38,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // ---- ROLE CHECK ----
     // Use the unified getUserRole() from supabase.js which knows about:
-    //   'owner' â€” is_admin=true in DB
-    //   'admin' â€” has valid admin-key session
-    //   'user'  â€” regular Discord user
-    //   null    â€” not logged in
+    //   'owner' Ã¢â‚¬â€ is_admin=true in DB
+    //   'admin' Ã¢â‚¬â€ has valid admin-key session
+    //   'user'  Ã¢â‚¬â€ regular Discord user
+    //   null    Ã¢â‚¬â€ not logged in
     let role = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -56,7 +56,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log("[admin] resolved role:", role);
 
     if (!role) {
-      // Not logged in â€” go back to landing page for Discord login
+      // Not logged in Ã¢â‚¬â€ go back to landing page for Discord login
       clearTimeout(forceShow);
       window.location.href = "/";
       return;
@@ -80,7 +80,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (_) { currentUser = null; }
 
     if (!currentUser) {
-      // Something odd â€” role said owner but no user. Back to landing.
+      // Something odd Ã¢â‚¬â€ role said owner but no user. Back to landing.
       clearTimeout(forceShow);
       window.location.href = "/";
       return;
@@ -101,11 +101,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       };
     }
 
-    // ---- Owner confirmed â€” render panel and load data ----
+    // ---- Owner confirmed Ã¢â‚¬â€ render panel and load data ----
     clearTimeout(forceShow);
     renderAdminInfo();
 
-    // Load data in parallel â€” owner sees everything, admin sees only own-scoped data
+    // Load data in parallel Ã¢â‚¬â€ owner sees everything, admin sees only own-scoped data
     // Hide sections that show cross-tenant data (Users, System Logs, Notifications, Sessions)
     if (isTenantAdmin) {
       applyAdminTierUiHiding();
@@ -118,7 +118,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       loadProjectsForForm().catch(e => console.warn("loadProjectsForForm:", e)),
     ];
 
-    // Owner-only loaders (skip for admin tier â€” sections are hidden anyway)
+    // Owner-only loaders (skip for admin tier Ã¢â‚¬â€ sections are hidden anyway)
     const ownerOnlyLoaders = isTenantAdmin ? [] : [
       loadUsers().catch(e => console.warn("loadUsers:", e)),
       loadLogs().catch(e => console.warn("loadLogs:", e)),
@@ -676,13 +676,31 @@ async function generateKeys() {
   if (qty < 1 || qty > 500) return showToast("Quantity must be 1-500", "error");
 
   // Detect login mode: admin-key session vs. Discord OAuth (owner).
-  let sessionAdmin = null;
-  try {
-    const raw = localStorage.getItem("nexaks_session");
-    if (raw) sessionAdmin = JSON.parse(raw);
-  } catch (_) {}
-  const isAdminKeyOnly = !!(sessionAdmin && sessionAdmin.login_method &&
-    String(sessionAdmin.login_method) === "admin_key" && sessionAdmin.key);
+  // v6: role is now DB-driven (window.KEYORA_CURRENT_ROLE set by init).
+  // Admin tier uses server endpoint (RLS bypass); owner uses direct insert.
+  const currentRole = window.KEYORA_CURRENT_ROLE || "owner";
+  const isAdminKeyOnly = (currentRole === "admin");
+
+  // For admin tier, fetch their own active admin key from DB (server endpoint requires it).
+  let sessionAdmin = { key: null };
+  if (isAdminKeyOnly && currentUser?.id) {
+    try {
+      const { data: myKeys } = await NexaKS.supabase
+        .from("keys")
+        .select("key")
+        .eq("user_id", currentUser.id)
+        .eq("plan", "admin")
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (myKeys && myKeys.length > 0) sessionAdmin.key = myKeys[0].key;
+    } catch (e) {
+      console.warn("Failed to fetch admin key for generation:", e);
+    }
+    if (!sessionAdmin.key) {
+      return showToast("Could not resolve your admin key. Try refreshing the page.", "error");
+    }
+  }
 
   // Admin-key sessions can NEVER mint admin-plan keys (only the owner can).
   if (isAdminKeyOnly && plan === "admin") {
@@ -1646,7 +1664,7 @@ function showNotifToast(title, username, message) {
   titleEl.textContent = title;
   const bodyEl = document.createElement("div");
   bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
-  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â " + message : "");
+  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬ ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â " + message : "");
   toast.appendChild(titleEl);
   toast.appendChild(bodyEl);
   container.appendChild(toast);
@@ -1895,7 +1913,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 // ========== Admin tier UI hiding ==========
-// Owner-only sections that cross tenant boundaries â€” hidden for admin-key holders.
+// Owner-only sections that cross tenant boundaries Ã¢â‚¬â€ hidden for admin-key holders.
 // This runs client-side; the server endpoints already scope by created_by / owner_id.
 function applyAdminTierUiHiding() {
   const OWNER_ONLY_SECTION_IDS = [
