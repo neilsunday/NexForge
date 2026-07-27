@@ -807,7 +807,7 @@
     }
 
     // ---- Admin Key Modal ----
-    // Turnstile site key Ã¢â‚¬â€ replace with your real public site key.
+    // Turnstile site key ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â replace with your real public site key.
     // Falls back to Cloudflare's always-passes test key so the modal works out of the box.
     const NEXAKS_TURNSTILE_SITE_KEY = window.NEXAKS_TURNSTILE_SITE_KEY ||
       '0x4AAAAAAD-YvdvOI_vA3JJt'; // Cloudflare Turnstile site key
@@ -899,8 +899,48 @@
           login_method: 'admin_key',
           expires_at: Date.now() + 7 * 24 * 3600 * 1000
         };
+        // Save session in BOTH old and new formats for backward compat + gate.js detection
         localStorage.setItem('nexaks_session', JSON.stringify(session));
+        localStorage.setItem('keyora_session', JSON.stringify({
+          key: data.session.key,
+          admin_key: data.session.key,
+          plan: 'admin',
+          user_id: data.session.user_id || null,
+          username: data.session.username || 'Admin',
+          is_admin: true,
+          login_method: 'admin_key',
+          expires_at: Date.now() + 7 * 24 * 3600 * 1000
+        }));
 
+        // Option C flow: check for existing Discord session, otherwise trigger OAuth
+        btn.innerHTML = '<span class="spinner-inline"></span> Checking Discord session...';
+        try {
+          const client = window.Keyora || window.NexaKS;
+          if (client && client.getCurrentUser) {
+            const user = await client.getCurrentUser();
+            if (user) {
+              // Discord session already exists â€” go straight to dashboard
+              // gate.js will detect the admin_key session and elevate role to 'admin'
+              window.location.href = '/dashboard.html';
+              return;
+            }
+          }
+        } catch (_) {}
+
+        // No Discord session yet â€” trigger Discord OAuth
+        // After OAuth callback, gate.js will see the admin_key session in localStorage
+        // and elevate the role to 'admin' (kilala sila via Discord ID)
+        btn.innerHTML = '<span class="spinner-inline"></span> Redirecting to Discord...';
+        try {
+          const client = window.Keyora || window.NexaKS;
+          if (client && client.signInWithDiscord) {
+            await client.signInWithDiscord();
+            return;
+          }
+        } catch (_) {}
+
+        // Fallback if OAuth trigger fails: just go to dashboard
+        // (dashboard.html will show "Not signed in" state with a login button)
         window.location.href = '/dashboard.html';
       } catch (ex) {
         btn.disabled = false;
