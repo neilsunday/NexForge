@@ -1935,10 +1935,10 @@ function applyAdminTierUiHiding() {
     "tab-sessions",        // Active sessions (all users)
   ];
   const OWNER_ONLY_SIDEBAR_ACTIONS = [
-    "showSection('users')",
-    "showSection('logs')",
-    "showSection('notifications')",
-    "showSection('sessions')",
+    "showtab('users')",
+    "showtab('logs')",
+    "showtab('notifications')",
+    "showtab('sessions')",
   ];
 
   const hide = () => {
