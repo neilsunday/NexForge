@@ -239,15 +239,27 @@ async function loadStats() {
 // ========== Load all keys ==========
 async function loadKeys() {
   try {
-    // Detect session type - admin_key vs Discord owner
-    let sessionRaw = null;
-    try { sessionRaw = localStorage.getItem("nexaks_session"); } catch (_) {}
-    const session = sessionRaw ? JSON.parse(sessionRaw) : null;
-    const isAdminKey = !!(session && String(session.login_method || "").includes("admin_key") && session.key);
+    // v6: role-driven detection (was: localStorage-based, broken since v5).
+    // Admin tier passes admin_key (server bypasses RLS + scopes to own-created keys).
+    // Owner passes owner_id (server verifies is_admin=true).
+    const currentRole = window.KEYORA_CURRENT_ROLE || "owner";
+    const isAdminKey = (currentRole === "admin");
 
     const body = { limit: 50 };
-    if (isAdminKey) {
-      body.admin_key = session.key;
+    if (isAdminKey && currentUser?.id) {
+      // Fetch admin's own active admin key from DB
+      const { data: myKeys } = await NexaKS.supabase
+        .from("keys")
+        .select("key")
+        .eq("user_id", currentUser.id)
+        .eq("plan", "admin")
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (!myKeys || myKeys.length === 0) {
+        throw new Error("Could not resolve your admin key");
+      }
+      body.admin_key = myKeys[0].key;
     } else if (currentUser?.id) {
       body.owner_id = currentUser.id;
     } else {
