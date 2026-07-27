@@ -2,7 +2,9 @@
 
 let currentUser = null;
 let currentProfile = null;
-const charts = {}; // holds chart.js instances so we can destroy before re-render
+let currentRole = null;        // 'owner' or 'admin'
+let scopedProjectIds = null;   // null = owner (see all); array = admin (own project IDs only)
+const charts = {};
 
 // Theme colors matching the site palette
 const COLORS = {
@@ -41,19 +43,29 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    currentProfile = await NexaKS.getUserProfile(currentUser.id);
-    if (!currentProfile?.is_admin) {
+    // Resolve role via unified helper â€” allows both owner AND admin tier
+    currentRole = await NexaKS.getUserRole();
+    if (currentRole !== "owner" && currentRole !== "admin") {
       clearTimeout(forceShow);
       if (loader) loader.style.display = "none";
       if (denied) denied.style.display = "flex";
       return;
     }
 
+    currentProfile = await NexaKS.getUserProfile(currentUser.id);
+
+    // For admin tier: pre-fetch own project IDs so we can scope every query
+    if (currentRole === "admin") {
+      const { data: ownProjects } = await NexaKS.supabase
+        .from("projects").select("id").eq("owner_id", currentUser.id);
+      scopedProjectIds = (ownProjects || []).map(p => p.id);
+      console.log("[analytics] admin tier: scoped to " + scopedProjectIds.length + " project(s)");
+    }
+
     clearTimeout(forceShow);
     if (loader) loader.style.display = "none";
     if (main) main.style.display = "grid";
 
-    // Chart.js default styling for dark theme
     if (window.Chart) {
       Chart.defaults.color = COLORS.muted;
       Chart.defaults.borderColor = COLORS.grid;
@@ -62,8 +74,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     await loadAnalytics();
-
-    // Auto-refresh every 60 seconds
     setInterval(loadAnalytics, 60_000);
   } catch (err) {
     console.error("Analytics init:", err);
@@ -73,9 +83,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
+// ========== Scoping helper ==========
+// Returns a Supabase query with .in('project_id', scopedProjectIds) applied for admin tier.
+// Owner sees everything, admin only sees rows tied to their own projects.
+function scopeKeysQuery(q) {
+  if (currentRole === "admin") {
+    if (!scopedProjectIds || scopedProjectIds.length === 0) {
+      // Admin with no projects yet â€” return a query that matches nothing
+      return q.eq("project_id", "00000000-0000-0000-0000-000000000000");
+    }
+    return q.in("project_id", scopedProjectIds);
+  }
+  return q; // owner: no filter
+}
+
 // ========== Main loader ==========
 async function loadAnalytics() {
-  // Run all queries in parallel
   await Promise.all([
     loadDailyActivity(),
     loadKeysByStatus(),
@@ -94,81 +117,70 @@ async function loadDailyActivity() {
     cutoff.setDate(cutoff.getDate() - 30);
     const cutoffIso = cutoff.toISOString();
 
-    // Fetch redemption logs (activations) and execution logs in parallel
+    // For admin: filter logs to those tied to keys they created
+    // Simpler: pull scoped keys first, then filter logs by their key values
+    let scopedKeys = null;
+    if (currentRole === "admin") {
+      const { data: keys } = await scopeKeysQuery(
+        NexaKS.supabase.from("keys").select("key")
+      );
+      scopedKeys = (keys || []).map(k => k.key);
+      if (scopedKeys.length === 0) {
+        renderChart("chartDailyActivity", emptyLineChart());
+        return;
+      }
+    }
+
+    const buildQuery = (actions) => {
+      let q = NexaKS.supabase.from("logs").select("created_at, key")
+        .in("action", actions).eq("status", "success").gte("created_at", cutoffIso);
+      if (scopedKeys) q = q.in("key", scopedKeys);
+      return q;
+    };
+
     const [redeems, execs] = await Promise.all([
-      NexaKS.supabase.from("logs").select("created_at")
-        .in("action", ["redeem", "verify_bind"])
-        .eq("status", "success")
-        .gte("created_at", cutoffIso),
-      NexaKS.supabase.from("logs").select("created_at")
-        .eq("action", "verify")
-        .eq("status", "success")
-        .gte("created_at", cutoffIso),
+      buildQuery(["redeem", "verify_bind"]),
+      buildQuery(["verify"]),
     ]);
 
-    // Bucket by day
-    const labels = [];
-    const activations = [];
-    const executions = [];
+    const labels = [], activations = [], executions = [];
     for (let i = 29; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
       labels.push(d.toLocaleDateString("en-US", { month: "short", day: "numeric" }));
-
-      const actCount = (redeems.data || []).filter(r => r.created_at.slice(0, 10) === key).length;
-      const execCount = (execs.data || []).filter(r => r.created_at.slice(0, 10) === key).length;
-      activations.push(actCount);
-      executions.push(execCount);
+      activations.push((redeems.data || []).filter(r => r.created_at.slice(0, 10) === key).length);
+      executions.push((execs.data || []).filter(r => r.created_at.slice(0, 10) === key).length);
     }
 
     renderChart("chartDailyActivity", {
       type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "Activations",
-            data: activations,
-            borderColor: COLORS.green,
-            backgroundColor: COLORS.green + "20",
-            tension: 0.3,
-            fill: true,
-            pointRadius: 2,
-            pointHoverRadius: 5,
-          },
-          {
-            label: "Executions",
-            data: executions,
-            borderColor: COLORS.purple,
-            backgroundColor: COLORS.purple + "20",
-            tension: 0.3,
-            fill: true,
-            pointRadius: 2,
-            pointHoverRadius: 5,
-          },
-        ],
-      },
+      data: { labels, datasets: [
+        { label: "Activations", data: activations, borderColor: COLORS.green, backgroundColor: COLORS.green + "20", tension: 0.3, fill: true, pointRadius: 2, pointHoverRadius: 5 },
+        { label: "Executions", data: executions, borderColor: COLORS.purple, backgroundColor: COLORS.purple + "20", tension: 0.3, fill: true, pointRadius: 2, pointHoverRadius: 5 },
+      ]},
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
+        responsive: true, maintainAspectRatio: false,
         interaction: { intersect: false, mode: "index" },
-        plugins: {
-          legend: { position: "top", labels: { boxWidth: 12, padding: 12 } },
-        },
-        scales: {
-          x: { grid: { display: false } },
-          y: { beginAtZero: true, ticks: { precision: 0 } },
-        },
+        plugins: { legend: { position: "top", labels: { boxWidth: 12, padding: 12 } } },
+        scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 } } },
       },
     });
   } catch (e) { console.error("loadDailyActivity:", e); }
 }
 
+function emptyLineChart() {
+  return {
+    type: "line",
+    data: { labels: [], datasets: [] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  };
+}
+
 // ========== Chart 2: Keys by Status (doughnut) ==========
 async function loadKeysByStatus() {
   try {
-    const { data } = await NexaKS.supabase.from("keys").select("status");
+    const { data } = await scopeKeysQuery(NexaKS.supabase.from("keys").select("status"));
     const counts = { active: 0, unclaimed: 0, revoked: 0, expired: 0 };
     (data || []).forEach(k => { if (counts.hasOwnProperty(k.status)) counts[k.status]++; });
 
@@ -179,16 +191,11 @@ async function loadKeysByStatus() {
         datasets: [{
           data: [counts.active, counts.unclaimed, counts.revoked, counts.expired],
           backgroundColor: [STATUS_COLORS.active, STATUS_COLORS.unclaimed, STATUS_COLORS.revoked, STATUS_COLORS.expired],
-          borderColor: "rgba(0,0,0,0.4)",
-          borderWidth: 2,
+          borderColor: "rgba(0,0,0,0.4)", borderWidth: 2,
         }],
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 10, padding: 8, font: { size: 11 } } },
-        },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, padding: 8, font: { size: 11 } } } },
         cutout: "60%",
       },
     });
@@ -198,7 +205,7 @@ async function loadKeysByStatus() {
 // ========== Chart 3: Keys by Plan (doughnut) ==========
 async function loadKeysByPlan() {
   try {
-    const { data } = await NexaKS.supabase.from("keys").select("plan");
+    const { data } = await scopeKeysQuery(NexaKS.supabase.from("keys").select("plan"));
     const counts = { free: 0, pro: 0, enterprise: 0 };
     (data || []).forEach(k => { if (counts.hasOwnProperty(k.plan)) counts[k.plan]++; });
 
@@ -209,16 +216,11 @@ async function loadKeysByPlan() {
         datasets: [{
           data: [counts.free, counts.pro, counts.enterprise],
           backgroundColor: [PLAN_COLORS.free, PLAN_COLORS.pro, PLAN_COLORS.enterprise],
-          borderColor: "rgba(0,0,0,0.4)",
-          borderWidth: 2,
+          borderColor: "rgba(0,0,0,0.4)", borderWidth: 2,
         }],
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 10, padding: 8, font: { size: 11 } } },
-        },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, padding: 8, font: { size: 11 } } } },
         cutout: "60%",
       },
     });
@@ -228,9 +230,14 @@ async function loadKeysByPlan() {
 // ========== Chart 4: Keys by Project (bar chart) ==========
 async function loadKeysByProject() {
   try {
+    // Scope both queries â€” admin sees only own projects
+    const projectsQuery = (currentRole === "admin")
+      ? NexaKS.supabase.from("projects").select("id, name, slug").eq("owner_id", currentUser.id)
+      : NexaKS.supabase.from("projects").select("id, name, slug");
+
     const [keysRes, projRes] = await Promise.all([
-      NexaKS.supabase.from("keys").select("project_id"),
-      NexaKS.supabase.from("projects").select("id, name, slug"),
+      scopeKeysQuery(NexaKS.supabase.from("keys").select("project_id")),
+      projectsQuery,
     ]);
 
     const projectMap = {};
@@ -242,7 +249,6 @@ async function loadKeysByProject() {
       counts[label] = (counts[label] || 0) + 1;
     });
 
-    // Sort descending
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const labels = sorted.map(x => x[0]);
     const values = sorted.map(x => x[1]);
@@ -250,24 +256,14 @@ async function loadKeysByProject() {
 
     renderChart("chartKeysByProject", {
       type: "bar",
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          backgroundColor: labels.map((_, i) => palette[i % palette.length]),
-          borderRadius: 6,
-          maxBarThickness: 40,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        indexAxis: "y",
+      data: { labels, datasets: [{
+        data: values,
+        backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+        borderRadius: 6, maxBarThickness: 40,
+      }]},
+      options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
         plugins: { legend: { display: false } },
-        scales: {
-          x: { beginAtZero: true, ticks: { precision: 0 } },
-          y: { grid: { display: false } },
-        },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { grid: { display: false } } },
       },
     });
   } catch (e) { console.error("loadKeysByProject:", e); }
@@ -279,14 +275,21 @@ async function loadHwidResets() {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 7);
 
-    const { data } = await NexaKS.supabase.from("logs")
-      .select("created_at")
+    let scopedKeys = null;
+    if (currentRole === "admin") {
+      const { data: keys } = await scopeKeysQuery(NexaKS.supabase.from("keys").select("key"));
+      scopedKeys = (keys || []).map(k => k.key);
+      if (scopedKeys.length === 0) { renderChart("chartHwidResets", emptyLineChart()); return; }
+    }
+
+    let q = NexaKS.supabase.from("logs").select("created_at, key")
       .in("action", ["reset_hwid", "owner_force_reset"])
       .eq("status", "success")
       .gte("created_at", cutoff.toISOString());
+    if (scopedKeys) q = q.in("key", scopedKeys);
+    const { data } = await q;
 
-    const labels = [];
-    const values = [];
+    const labels = [], values = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
@@ -297,23 +300,10 @@ async function loadHwidResets() {
 
     renderChart("chartHwidResets", {
       type: "bar",
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          backgroundColor: COLORS.orange,
-          borderRadius: 6,
-          maxBarThickness: 32,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
+      data: { labels, datasets: [{ data: values, backgroundColor: COLORS.orange, borderRadius: 6, maxBarThickness: 32 }]},
+      options: { responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false } },
-          y: { beginAtZero: true, ticks: { precision: 0 } },
-        },
+        scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 } } },
       },
     });
   } catch (e) { console.error("loadHwidResets:", e); }
@@ -325,11 +315,10 @@ async function loadTopUsers() {
   if (!container) return;
 
   try {
-    // Sum execution_count grouped by user_id
-    const { data: keys } = await NexaKS.supabase.from("keys")
-      .select("user_id, execution_count")
-      .not("user_id", "is", null)
-      .gt("execution_count", 0);
+    const { data: keys } = await scopeKeysQuery(
+      NexaKS.supabase.from("keys").select("user_id, execution_count")
+        .not("user_id", "is", null).gt("execution_count", 0)
+    );
 
     const totals = {};
     (keys || []).forEach(k => { totals[k.user_id] = (totals[k.user_id] || 0) + (k.execution_count || 0); });
@@ -340,11 +329,9 @@ async function loadTopUsers() {
       return;
     }
 
-    // Fetch usernames
     const userIds = topIds.map(x => x[0]);
     const { data: users } = await NexaKS.supabase.from("users")
-      .select("id, username, avatar_url")
-      .in("id", userIds);
+      .select("id, username, avatar_url").in("id", userIds);
     const userMap = {};
     (users || []).forEach(u => { userMap[u.id] = u; });
 
@@ -370,11 +357,12 @@ async function loadTopKeys() {
   if (!container) return;
 
   try {
-    const { data } = await NexaKS.supabase.from("keys")
-      .select("key, execution_count, plan")
-      .gt("execution_count", 0)
-      .order("execution_count", { ascending: false })
-      .limit(10);
+    const { data } = await scopeKeysQuery(
+      NexaKS.supabase.from("keys").select("key, execution_count, plan")
+        .gt("execution_count", 0)
+        .order("execution_count", { ascending: false })
+        .limit(10)
+    );
 
     if (!data || data.length === 0) {
       container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:13px;">No executions yet</div>';
@@ -384,7 +372,6 @@ async function loadTopKeys() {
     container.innerHTML = data.map((k, i) => {
       const rank = i + 1;
       const rankClass = rank <= 3 ? ' top-' + rank : '';
-      // Shorten the key for display
       const shortKey = k.key.length > 20 ? k.key.substring(0, 18) + "..." : k.key;
       return '<div class="top-list-item">' +
         '<div class="top-list-rank' + rankClass + '">' + rank + '</div>' +
@@ -402,10 +389,7 @@ async function loadTopKeys() {
 function renderChart(canvasId, config) {
   const canvas = document.getElementById(canvasId);
   if (!canvas || !window.Chart) return;
-
-  if (charts[canvasId]) {
-    charts[canvasId].destroy();
-  }
+  if (charts[canvasId]) charts[canvasId].destroy();
   charts[canvasId] = new Chart(canvas, config);
 }
 
