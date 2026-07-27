@@ -118,35 +118,35 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-    // ---- Fix A: Auto-bind pending admin key to this Discord user ----
+    // ---- Fix A (Option A): Auto-bind pending admin key via server endpoint ----
     // If the user came here via the admin-key modal on index.html, ang key
     // ay naka-store sa 'nexaks_pending_admin_key' pero walang user_id kasi
-    // walang Discord session pa noon. Bind it now para ma-detect ng gate.js
-    // as 'admin' tier on the next role check.
+    // walang Discord session pa noon. Call /api/bind-admin-key which uses
+    // the service role to bypass RLS on the keys table.
     try {
       const pendingKey = localStorage.getItem("nexaks_pending_admin_key");
       if (pendingKey && currentUser?.id) {
-        const { error: bindError } = await NexaKS.supabase
-          .from("keys")
-          .update({ user_id: currentUser.id })
-          .eq("key", pendingKey)
-          .eq("plan", "admin")
-          .in("status", ["active", "unclaimed"])
-          .is("user_id", null); // Only bind if not yet claimed by anyone
+        const res = await fetch("/api/bind-admin-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: pendingKey, user_id: currentUser.id })
+        });
+        const result = await res.json().catch(() => ({}));
 
-        if (bindError) {
-          console.warn("Admin key auto-bind failed:", bindError.message);
-        } else {
+        localStorage.removeItem("nexaks_pending_admin_key");
+
+        if (res.ok && result.success) {
           console.log("[dashboard] Admin key bound to user:", currentUser.id);
           // Force reload so gate.js re-runs and picks up the new admin role
-          localStorage.removeItem("nexaks_pending_admin_key");
           setTimeout(() => window.location.reload(), 500);
           return;
+        } else {
+          console.warn("Admin key auto-bind failed:", result.error || res.status);
         }
-        localStorage.removeItem("nexaks_pending_admin_key");
       }
     } catch (e) {
       console.warn("Admin key auto-bind exception:", e);
+      try { localStorage.removeItem("nexaks_pending_admin_key"); } catch (_) {}
     }
 
     try {
