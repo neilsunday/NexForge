@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const main = document.getElementById("adminMain");
   const denied = document.getElementById("deniedState");
 
-  // Longer safety timeout — 15s to accommodate slow mobile networks
+  // Longer safety timeout â€” 15s to accommodate slow mobile networks
   const forceShow = setTimeout(() => {
     if (loader) loader.style.display = "none";
     if (denied) denied.style.display = "flex";
@@ -20,7 +20,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     // ---- WAIT FOR AUTH CLIENT ----
     // The auth client (Keyora, alias NexaKS) is loaded by supabase.js.
-    // On slow mobile networks it may take a few seconds — wait up to 8s.
+    // On slow mobile networks it may take a few seconds â€” wait up to 8s.
     let client = null;
     for (let i = 0; i < 80; i++) {
       if (window.Keyora?.getUserRole) { client = window.Keyora; break; }
@@ -38,10 +38,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // ---- ROLE CHECK ----
     // Use the unified getUserRole() from supabase.js which knows about:
-    //   'owner' — is_admin=true in DB
-    //   'admin' — has valid admin-key session
-    //   'user'  — regular Discord user
-    //   null    — not logged in
+    //   'owner' â€” is_admin=true in DB
+    //   'admin' â€” has valid admin-key session
+    //   'user'  â€” regular Discord user
+    //   null    â€” not logged in
     let role = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -56,19 +56,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log("[admin] resolved role:", role);
 
     if (!role) {
-      // Not logged in — go back to landing page for Discord login
+      // Not logged in â€” go back to landing page for Discord login
       clearTimeout(forceShow);
       window.location.href = "/";
       return;
     }
 
-    // Admin panel is OWNER-ONLY (only site owner can generate keys)
-    if (role !== "owner") {
+    // Admin panel: OWNER sees everything, ADMIN sees tenant-scoped view
+    if (role !== "owner" && role !== "admin") {
       clearTimeout(forceShow);
       if (loader) loader.style.display = "none";
       if (denied) denied.style.display = "flex";
       return;
     }
+
+    // Store role globally so other functions can check it (used to hide owner-only sections)
+    window.KEYORA_CURRENT_ROLE = role;
+    const isTenantAdmin = (role === "admin");
 
     // ---- Load current user + profile for display ----
     try {
@@ -76,7 +80,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (_) { currentUser = null; }
 
     if (!currentUser) {
-      // Something odd — role said owner but no user. Back to landing.
+      // Something odd â€” role said owner but no user. Back to landing.
       clearTimeout(forceShow);
       window.location.href = "/";
       return;
@@ -91,29 +95,40 @@ document.addEventListener("DOMContentLoaded", async () => {
       const meta = currentUser.user_metadata || {};
       currentProfile = {
         id: currentUser.id,
-        username: meta.full_name || meta.name || "Owner",
+        username: meta.full_name || meta.name || (isTenantAdmin ? "Admin" : "Owner"),
         avatar_url: meta.avatar_url || null,
-        is_admin: true
+        is_admin: (role === "owner")
       };
     }
 
-    // ---- Owner confirmed — render panel and load data ----
+    // ---- Owner confirmed â€” render panel and load data ----
     clearTimeout(forceShow);
     renderAdminInfo();
 
-    // Load all data in parallel (each has its own try/catch inside)
-    await Promise.all([
+    // Load data in parallel â€” owner sees everything, admin sees only own-scoped data
+    // Hide sections that show cross-tenant data (Users, System Logs, Notifications, Sessions)
+    if (isTenantAdmin) {
+      applyAdminTierUiHiding();
+    }
+
+    const commonLoaders = [
       loadStats().catch(e => console.warn("loadStats:", e)),
       loadKeys().catch(e => console.warn("loadKeys:", e)),
-      loadUsers().catch(e => console.warn("loadUsers:", e)),
-      loadLogs().catch(e => console.warn("loadLogs:", e)),
       loadScripts().catch(e => console.warn("loadScripts:", e)),
       loadProjectsForForm().catch(e => console.warn("loadProjectsForForm:", e)),
+    ];
+
+    // Owner-only loaders (skip for admin tier â€” sections are hidden anyway)
+    const ownerOnlyLoaders = isTenantAdmin ? [] : [
+      loadUsers().catch(e => console.warn("loadUsers:", e)),
+      loadLogs().catch(e => console.warn("loadLogs:", e)),
       loadNotifications().catch(e => console.warn("loadNotifications:", e)),
       loadNotifStats().catch(e => console.warn("loadNotifStats:", e)),
       loadSessions().catch(e => console.warn("loadSessions:", e)),
       loadSessionsStats().catch(e => console.warn("loadSessionsStats:", e)),
-    ]);
+    ];
+
+    await Promise.all([...commonLoaders, ...ownerOnlyLoaders]);
 
     // Real-time log subscription (also guarded)
     try { subscribeToLogs(); } catch (e) { console.warn("subscribeToLogs:", e); }
@@ -1631,7 +1646,7 @@ function showNotifToast(title, username, message) {
   titleEl.textContent = title;
   const bodyEl = document.createElement("div");
   bodyEl.style.cssText = "color:#a0a0b0;font-size:12px;";
-  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â " + message : "");
+  bodyEl.textContent = username + (message ? " ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â " + message : "");
   toast.appendChild(titleEl);
   toast.appendChild(bodyEl);
   container.appendChild(toast);
@@ -1877,3 +1892,54 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(applyHide, 2000);
   } catch (_) {}
 });
+
+
+// ========== Admin tier UI hiding ==========
+// Owner-only sections that cross tenant boundaries â€” hidden for admin-key holders.
+// This runs client-side; the server endpoints already scope by created_by / owner_id.
+function applyAdminTierUiHiding() {
+  const OWNER_ONLY_SECTION_IDS = [
+    "section-users",         // Users management (all users)
+    "section-logs",          // System logs (all events)
+    "section-notifications", // Notifications (system-wide)
+    "section-sessions",      // Active sessions (all users)
+  ];
+  const OWNER_ONLY_SIDEBAR_ACTIONS = [
+    "showSection('users')",
+    "showSection('logs')",
+    "showSection('notifications')",
+    "showSection('sessions')",
+  ];
+
+  const hide = () => {
+    // Hide the section containers
+    OWNER_ONLY_SECTION_IDS.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = "none";
+    });
+    // Hide the sidebar links that navigate to them
+    document.querySelectorAll("a[onclick]").forEach((a) => {
+      const onclick = String(a.getAttribute("onclick") || "");
+      for (const pat of OWNER_ONLY_SIDEBAR_ACTIONS) {
+        if (onclick.includes(pat.replace(/'/g, "'")) ||
+            onclick.includes(pat.replace(/'/g, '"'))) {
+          a.style.display = "none";
+          break;
+        }
+      }
+    });
+    // Also hide any stat cards / widgets tagged as owner-only via data-attr
+    document.querySelectorAll("[data-owneronly='true']").forEach((el) => {
+      el.style.display = "none";
+    });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", hide);
+  } else {
+    hide();
+  }
+  // Re-run for late-rendering nodes
+  setTimeout(hide, 300);
+  setTimeout(hide, 1000);
+}
