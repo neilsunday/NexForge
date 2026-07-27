@@ -597,6 +597,14 @@ async function confirmRedeem() {
   if (!key) return showToast("Enter a license key", "error");
   if (!key.startsWith("NXKS-")) return showToast("Invalid key format", "error");
 
+  // Owner guard: site owner already has full access â€” redeeming a key
+  // would bind it to their user_id and trigger a client-side role race
+  // (getUserRole may briefly return 'admin' instead of 'owner' after reload).
+  if (currentProfile?.is_admin === true) {
+    closeRedeemModal();
+    return showToast("You're the site owner â€” no need to redeem keys.", "info");
+  }
+
   closeRedeemModal();
   showToast("Redeeming...", "info");
 
