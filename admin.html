@@ -587,13 +587,8 @@
           const isOwner = role === 'owner';
           const isAdminOrOwner = role === 'owner' || role === 'admin';
           document.querySelectorAll('[data-adminonly="true"]').forEach(el => {
-            const isAdminPanel = (el.id === 'adminLink') ||
-                                 ((el.getAttribute('href') || '').includes('admin.html'));
-            if (isAdminPanel) {
-              el.style.display = isOwner ? '' : 'none';
-            } else {
-              el.style.display = isAdminOrOwner ? '' : 'none';
-            }
+            // Admin Panel is now shared: owner + admin both see it (tenant view for admin)
+            el.style.display = isAdminOrOwner ? '' : 'none';
           });
           return true;
         }
@@ -614,13 +609,8 @@
           const isOwner = role === 'owner';
           const isAdminOrOwner = role === 'owner' || role === 'admin';
           document.querySelectorAll('[data-adminonly="true"]').forEach(el => {
-            const isAdminPanel = (el.id === 'adminLink') ||
-                                 ((el.getAttribute('href') || '').includes('admin.html'));
-            if (isAdminPanel) {
-              el.style.display = isOwner ? '' : 'none';
-            } else {
-              el.style.display = isAdminOrOwner ? '' : 'none';
-            }
+            // Admin Panel is now shared: owner + admin both see it (tenant view for admin)
+            el.style.display = isAdminOrOwner ? '' : 'none';
           });
           return true;
         }
