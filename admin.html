@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Auth stack: MUST load in this exact order -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase.js"></script>
+    <script src="js/gate.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Load auth stack in correct order -->
-    <script src="js/gate.js"></script>
+
     <title>Admin Panel - Keyora</title>
     <!-- <script src="js/nexforge-guard.js"></script> DISABLED: was locking page -->
      <link rel="stylesheet" href="css/style.css">
@@ -575,8 +578,34 @@
         </div>
     </div>
 
-
     <!-- Defensive: force show admin nav items when window.KEYORA_ROLE is set -->
+    <script>
+      (function() {
+        function applyRole() {
+          const role = window.KEYORA_ROLE;
+          if (!role) return false;
+          const isOwner = role === 'owner';
+          const isAdminOrOwner = role === 'owner' || role === 'admin';
+          document.querySelectorAll('[data-adminonly="true"]').forEach(el => {
+            const isAdminPanel = (el.id === 'adminLink') ||
+                                 ((el.getAttribute('href') || '').includes('admin.html'));
+            if (isAdminPanel) {
+              el.style.display = isOwner ? '' : 'none';
+            } else {
+              el.style.display = isAdminOrOwner ? '' : 'none';
+            }
+          });
+          return true;
+        }
+        let tries = 0;
+        const timer = setInterval(() => {
+          tries++;
+          if (applyRole() || tries > 100) clearInterval(timer);
+        }, 200);
+      })();
+    </script>
+
+    <!-- Defensive: force show admin nav when role is set -->
     <script>
       (function() {
         function applyRole() {
