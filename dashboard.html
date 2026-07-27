@@ -1085,18 +1085,11 @@
         function applyRole() {
           const role = window.KEYORA_ROLE;
           if (!role) return false;
-          const isOwner = role === 'owner';
           const isAdminOrOwner = role === 'owner' || role === 'admin';
+          // Admin Panel is now shared: owner sees full view, admin sees tenant-scoped view.
+          // All admin-only nav items follow the same rule â€” visible to owner + admin.
           document.querySelectorAll('[data-adminonly="true"]').forEach(el => {
-            const isAdminPanel = (el.id === 'adminLink') ||
-                                 ((el.getAttribute('href') || '').includes('admin.html'));
-            if (isAdminPanel) {
-              // Admin Panel = owner only
-              el.style.display = isOwner ? '' : 'none';
-            } else {
-              // Other admin items = owner or admin-client
-              el.style.display = isAdminOrOwner ? '' : 'none';
-            }
+            el.style.display = isAdminOrOwner ? '' : 'none';
           });
           return true;
         }
