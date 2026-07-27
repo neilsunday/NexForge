@@ -118,6 +118,37 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
+    // ---- Fix A: Auto-bind pending admin key to this Discord user ----
+    // If the user came here via the admin-key modal on index.html, ang key
+    // ay naka-store sa 'nexaks_pending_admin_key' pero walang user_id kasi
+    // walang Discord session pa noon. Bind it now para ma-detect ng gate.js
+    // as 'admin' tier on the next role check.
+    try {
+      const pendingKey = localStorage.getItem("nexaks_pending_admin_key");
+      if (pendingKey && currentUser?.id) {
+        const { error: bindError } = await NexaKS.supabase
+          .from("keys")
+          .update({ user_id: currentUser.id })
+          .eq("key", pendingKey)
+          .eq("plan", "admin")
+          .in("status", ["active", "unclaimed"])
+          .is("user_id", null); // Only bind if not yet claimed by anyone
+
+        if (bindError) {
+          console.warn("Admin key auto-bind failed:", bindError.message);
+        } else {
+          console.log("[dashboard] Admin key bound to user:", currentUser.id);
+          // Force reload so gate.js re-runs and picks up the new admin role
+          localStorage.removeItem("nexaks_pending_admin_key");
+          setTimeout(() => window.location.reload(), 500);
+          return;
+        }
+        localStorage.removeItem("nexaks_pending_admin_key");
+      }
+    } catch (e) {
+      console.warn("Admin key auto-bind exception:", e);
+    }
+
     try {
       await loadUserKey();
     } catch (e) {
@@ -649,6 +680,7 @@ async function handleLogout() {
     localStorage.removeItem("keyora_session");
     localStorage.removeItem("nexaks_session");
     localStorage.removeItem("nexaks_pending_discord");
+    localStorage.removeItem("nexaks_pending_admin_key");
     localStorage.removeItem("keyora_session_row_id");
     sessionStorage.removeItem("nexaks_redirected");
   } catch (_) {}
