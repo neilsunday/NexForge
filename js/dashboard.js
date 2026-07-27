@@ -1,4 +1,4 @@
-/* NexaKS - Dashboard JS (short project-aware loader) */
+/* NexaKS - Dashboard JS (fixed: no race with gate.js) */
 
 let currentUser = null;
 let currentProfile = null;
@@ -17,28 +17,58 @@ document.addEventListener("DOMContentLoaded", async () => {
   const forceShow = setTimeout(() => {
     if (loader) loader.style.display = "none";
     if (main) main.style.display = "grid";
-  }, 6000);
+  }, 12000);
 
   try {
-    currentUser = await NexaKS.getCurrentUser();
-
-    if (!currentUser) {
-      if (sessionStorage.getItem("nexaks_redirected")) {
-        sessionStorage.removeItem("nexaks_redirected");
-        clearTimeout(forceShow);
-        if (loader)
-          loader.innerHTML =
-            '<div style="text-align:center;color:white;padding:40px;"><h2>Not signed in</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">go back</a> and sign in with Discord.</p></div>';
-        return;
-      }
-      sessionStorage.setItem("nexaks_redirected", "1");
-      window.location.href = "/";
+    // Wait for auth client (Keyora/NexaKS) to load - it's set by supabase.js in head
+    const client = window.Keyora || window.NexaKS;
+    if (!client) {
+      // supabase.js never loaded â€” hard failure, show message
+      clearTimeout(forceShow);
+      if (loader)
+        loader.innerHTML =
+          '<div style="text-align:center;color:white;padding:40px;"><h2>Auth failed to load</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">reload</a> or try again.</p></div>';
       return;
     }
 
-    sessionStorage.removeItem("nexaks_redirected");
+    // Wait for gate.js to resolve the role (it already retries + handles OAuth callback hash)
+    // gate.js sets window.KEYORA_ROLE after DB lookup. Poll up to 10 seconds.
+    let role = window.KEYORA_ROLE || null;
+    for (let i = 0; i < 100 && !role; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      role = window.KEYORA_ROLE || null;
+    }
 
-    currentProfile = await NexaKS.getUserProfile(currentUser.id);
+    // Get the Supabase user (should be cached now that gate.js resolved it)
+    try { currentUser = await client.getCurrentUser(); } catch (_) { currentUser = null; }
+
+    // If gate.js says not logged in AND we can't get a user, show sign-in prompt
+    // (NO redirect loop â€” user stays here and sees a clear message)
+    if (!role && !currentUser) {
+      clearTimeout(forceShow);
+      if (loader)
+        loader.innerHTML =
+          '<div style="text-align:center;color:white;padding:40px;"><h2>Not signed in</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">go back</a> and sign in with Discord.</p></div>';
+      return;
+    }
+
+    // Clear any legacy redirect marker from the old buggy version
+    try { sessionStorage.removeItem("nexaks_redirected"); } catch (_) {}
+
+    // Retry user fetch once if it failed initially
+    if (!currentUser) {
+      try { currentUser = await client.getCurrentUser(); } catch (_) {}
+    }
+    if (!currentUser) {
+      clearTimeout(forceShow);
+      if (loader)
+        loader.innerHTML =
+          '<div style="text-align:center;color:white;padding:40px;"><h2>Session issue</h2><p style="color:#a0a0b0;margin:16px 0;">Please <a href="/" style="color:#8b5cf6;">reload</a> and sign in again.</p></div>';
+      return;
+    }
+
+    // Load the user's profile row (with fallback creation if missing)
+    currentProfile = await client.getUserProfile(currentUser.id);
     if (!currentProfile) {
       const meta = currentUser.user_metadata || {};
       const discordId = meta.provider_id || meta.sub || null;
@@ -47,7 +77,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       // reuse it instead of inserting a duplicate.
       if (discordId) {
         try {
-          const { data: existingByDiscord } = await NexaKS.supabase
+          const { data: existingByDiscord } = await client.supabase
             .from("users")
             .select("*")
             .eq("discord_id", discordId)
@@ -60,7 +90,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (!currentProfile) {
         try {
-          const { data } = await NexaKS.supabase
+          const { data } = await client.supabase
             .from("users")
             .insert({
               id: currentUser.id,
@@ -217,7 +247,6 @@ function renderKey() {
 
   const hwid = currentKey.hwid;
   if ($("hwidValue")) {
-    // Short HWIDs (<12 chars) would overlap when sliced, so just show them raw.
     $("hwidValue").textContent = hwid
       ? hwid.length > 12
         ? hwid.substring(0, 8) + "..." + hwid.substring(hwid.length - 4)
@@ -257,7 +286,6 @@ function renderKey() {
         year: "numeric",
       });
   } else if (currentKey.duration_days) {
-    // Unclaimed-style fallback: duration set but not yet computed to a date.
     const d = currentKey.duration_days;
     const label = d + " day" + (d > 1 ? "s" : "");
     if ($("expiresIn"))
@@ -594,17 +622,9 @@ async function confirmRedeem() {
     .eq("key", key);
   if (error) return showToast("Redeem failed: " + error.message, "error");
 
-  if (existing.plan === "admin") {
-    try {
-      await NexaKS.supabase
-        .from("users")
-        .update({ is_admin: true })
-        .eq("id", currentUser.id);
-      if (currentProfile) currentProfile.is_admin = true;
-    } catch (e) {
-      console.warn("Admin promotion failed:", e);
-    }
-  }
+  // NOTE: admin keys no longer auto-promote is_admin â€” role is DB-driven now.
+  // Owner status is set only by the trg_first_user_admin trigger on the first Discord login.
+  // Client admins are detected via hasActiveAdminKey() in supabase.js (v5).
 
   await NexaKS.supabase.from("logs").insert({
     user_id: currentUser.id,
@@ -618,19 +638,23 @@ async function confirmRedeem() {
   await loadUserKey();
   await loadActivity();
   renderUserInfo();
+
+  // Reload the page so gate.js re-runs and picks up the new admin role
+  setTimeout(() => window.location.reload(), 1000);
 }
 
 async function handleLogout() {
-  if (!confirm("Sign out from NexaKS?")) return;
-  // Clear the gate.js session BEFORE signing out, so a fast back-nav
-  // doesn't land on a stale-session page.
+  if (!confirm("Sign out from Keyora?")) return;
   try {
+    localStorage.removeItem("keyora_session");
     localStorage.removeItem("nexaks_session");
     localStorage.removeItem("nexaks_pending_discord");
+    localStorage.removeItem("keyora_session_row_id");
     sessionStorage.removeItem("nexaks_redirected");
   } catch (_) {}
   try {
-    if (NexaKS?.signOut) await NexaKS.signOut();
+    const client = window.Keyora || window.NexaKS;
+    if (client?.signOut) await client.signOut();
   } catch (e) {
     console.warn("signOut:", e);
   }
