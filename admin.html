@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Load auth stack in correct order -->
+    <script src="js/gate.js"></script>
+    <title>Admin Panel - Keyora</title>
+    <!-- <script src="js/nexforge-guard.js"></script> DISABLED: was locking page -->
+     <link rel="stylesheet" href="css/style.css">
+ 
+ <style type="text/css">@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/greek-ext/wght/normal.woff2);unicode-range:U+1F00-1FFF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:400;src:url(/cf-fonts/v/inter/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/greek-ext/wght/normal.woff2);unicode-range:U+1F00-1FFF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:500;src:url(/cf-fonts/v/inter/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/greek-ext/wght/normal.woff2);unicode-range:U+1F00-1FFF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:600;src:url(/cf-fonts/v/inter/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:700;src:url(/cf-fonts/v/inter/5.2.8/greek-ext/wght/normal.woff2);unicode-range:U+1F00-1FFF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/greek-ext/wght/normal.woff2);unicode-range:U+1F00-1FFF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:Inter;font-style:normal;font-weight:800;src:url(/cf-fonts/v/inter/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:400;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:400;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:400;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:400;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:400;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:400;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:500;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/latin-ext/wght/normal.woff2);unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:500;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/cyrillic/wght/normal.woff2);unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:500;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/latin/wght/normal.woff2);unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:500;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/vietnamese/wght/normal.woff2);unicode-range:U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:500;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/greek/wght/normal.woff2);unicode-range:U+0370-0377,U+037A-037F,U+0384-038A,U+038C,U+038E-03A1,U+03A3-03FF;font-display:swap;}@font-face {font-family:JetBrains Mono;font-style:normal;font-weight:500;src:url(/cf-fonts/v/jetbrains-mono/5.2.8/cyrillic-ext/wght/normal.woff2);unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F;font-display:swap;}</style>
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    <div class="bg-grid"></div>
+
+    <!-- Auth check loader -->
+    <div id="authLoader" style="position:fixed;inset:0;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;z-index:9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Access denied state -->
+    <div id="deniedState" style="display:none;position:fixed;inset:0;background:var(--bg-primary);z-index:9998;display:none;align-items:center;justify-content:center;padding:20px;">
+        <div style="text-align:center;max-width:400px;">
+            <div style="width:64px;height:64px;margin:0 auto 20px;background:rgba(239,68,68,0.1);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--danger);">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4zM15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h2 style="font-size:22px;font-weight:700;margin-bottom:8px;">Access Denied</h2>
+            <p style="color:var(--text-secondary);margin-bottom:24px;">This page requires administrator privileges. Contact the system owner if you need access.</p>
+            <a href="dashboard.html" class="btn btn-primary">Go to Dashboard</a>
+        </div>
+    </div>
+
+    <div class="dashboard-layout" style="display:none;" id="adminMain">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <a href="index.html" class="logo">
+                    <svg class="logo-mark" width="24" height="24" viewBox="0 0 32 32" fill="none">
+                        <path d="M16 2L4 9v14l12 7 12-7V9L16 2z" stroke="url(#lg)" stroke-width="2" stroke-linejoin="round"/>
+                        <path d="M16 10v12M11 13l5-3 5 3M11 19l5 3 5-3" stroke="url(#lg)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <defs><linearGradient id="lg" x1="4" y1="2" x2="28" y2="30"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#ec4899"/></linearGradient></defs>
+                    </svg>
+                    <span class="logo-text">Keyora</span>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-section-title">Main</div>
+                <a href="dashboard.html">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 12l9-9 9 9M5 10v10h4v-6h6v6h4V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Dashboard
+                </a>
+
+                <div class="sidebar-section-title">Admin</div>
+                <a href="admin.html" class="active">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    Overview
+                </a>
+                <a href="#" onclick="showTab('generate'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    Generate Keys
+                </a>
+                <a href="#" onclick="showTab('keys'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 7a4 4 0 11-4 4M11 11L3 19l2 2 2-2 2 2 2-2 2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    All Keys
+                </a>
+                <a href="#" onclick="showTab('users'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M17 20v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 20v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/></svg>
+                    Users
+                </a>
+                <a href="#" onclick="showTab('notifications'); return false;" style="position:relative;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Notifications
+                    <span id="notifBadge" style="display:none;position:absolute;right:12px;top:50%;transform:translateY(-50%);background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px;min-width:18px;text-align:center;">0</span>
+                </a>
+                <a href="#" onclick="showTab('sessions'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 12v7a1 1 0 001 1h12a1 1 0 001-1v-7M8 9l4-4 4 4M12 5v11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Sessions
+                </a>
+                <a href="#" onclick="showTab('logs'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM14 2v6h6M8 13h8M8 17h8M8 9h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Audit Logs
+                </a>
+                <a href="#" onclick="showTab('scripts'); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Scripts
+                </a>
+
+                <div class="sidebar-section-title">Account</div>
+                <a href="#" onclick="handleLogout(); return false;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Sign Out
+                </a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <div class="page-header">
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <button class="sidebar-toggle" onclick="toggleSidebar()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </button>
+                    <div>
+                        <h1 class="page-title">Admin Panel</h1>
+                        <p class="page-subtitle">System-wide management and analytics</p>
+                    </div>
+                </div>
+                <div class="user-menu">
+                    <img id="adminAvatarImg" style="display:none;width:32px;height:32px;border-radius:50%;" alt="">
+                    <div class="user-avatar" id="adminAvatar" style="background:linear-gradient(135deg,#ef4444 0%,#f59e0b 100%);">A</div>
+                    <div class="user-info">
+                        <div class="user-name" id="adminName">Admin</div>
+                        <div class="user-role" style="color:var(--danger);">Owner</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Total Keys</div>
+                        <div class="stat-card-icon icon-purple">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 7a4 4 0 11-4 4M11 11L3 19l2 2 2-2 2 2 2-2 2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </div>
+                    </div>
+                    <div class="stat-card-value" id="statTotalKeys">-</div>
+                    <div class="stat-card-change" id="statTotalKeysSub">Loading...</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Active Users</div>
+                        <div class="stat-card-icon icon-blue">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M17 20v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 20v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/></svg>
+                        </div>
+                    </div>
+                    <div class="stat-card-value" id="statActiveUsers">-</div>
+                    <div class="stat-card-change" id="statActiveUsersSub">Loading...</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Events Today</div>
+                        <div class="stat-card-icon icon-green">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                        </div>
+                    </div>
+                    <div class="stat-card-value" id="statEventsToday">-</div>
+                    <div class="stat-card-change" id="statEventsTodaySub">Loading...</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <div class="stat-card-label">Revoked Keys</div>
+                        <div class="stat-card-icon icon-orange">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M4.9 4.9l14.2 14.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        </div>
+                    </div>
+                    <div class="stat-card-value" id="statRevoked">-</div>
+                    <div class="stat-card-change" id="statRevokedSub">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Generate Keys -->
+            <div class="card" id="tab-generate">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Generate License Keys</div>
+                        <div class="card-desc">Bulk create keys - auto-downloads as .txt file</div>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;">
+                    <div class="form-group">
+                        <label class="form-label">Quantity</label>
+                        <input type="number" class="form-input" id="genQty" value="10" min="1" max="500">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Duration</label>
+                        <select class="form-select" id="genDuration">
+                            <option value="1">1 day</option>
+                            <option value="7">7 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="90">90 days</option>
+                            <option value="365">1 year</option>
+                            <option value="lifetime">Lifetime</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Plan</label>
+                        <select class="form-select" id="genPlan">
+                            <option value="free">Free</option>
+                            <option value="pro" selected>Pro</option>
+                            <option value="enterprise">Enterprise</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">HWID Reset Limit</label>
+                        <input type="number" class="form-input" id="genResets" value="5" min="0" max="99">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Project</label>
+                        <select class="form-select" id="genProject">
+                            <option value="">Click Me!</option>
+                        </select>
+                        <div class="form-hint">Attach keys to a project so users get the right script</div>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" onclick="generateKeys()" id="genBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+                    Generate Keys
+                </button>
+            </div>
+
+            <!-- Keys table -->
+            <div class="card" id="tab-keys">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">All Keys</div>
+                        <div class="card-desc" id="keysDesc">Loading...</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="text" class="form-input" placeholder="Search key or user..." id="keySearch" style="width:200px;max-width:100%;" oninput="filterKeys()">
+                        <button class="btn btn-danger" onclick="openBulkDeleteModal()">Bulk Delete</button>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Key</th>
+                                <th>User</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Expires</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="keysTableBody">
+                            <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Users table -->
+            <div class="card" id="tab-users">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Users</div>
+                        <div class="card-desc" id="usersDesc">Loading...</div>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Discord</th>
+                                <th>Joined</th>
+                                <th>Keys</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Audit Logs -->
+            <div class="card" id="tab-logs">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Audit Logs</div>
+                        <div class="card-desc" id="logsDesc">Loading...</div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-ghost" onclick="loadLogs()">Refresh</button>
+                        <button class="btn btn-danger" onclick="openClearLogsModal()">Clear Logs</button>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody">
+                            <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Scripts Management -->
+            <div class="card" id="tab-scripts">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Scripts Management</div>
+                        <div class="card-desc" id="scriptsDesc">Loading...</div>
+                    </div>
+                    <button class="btn btn-primary" onclick="openScriptModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        Add New Script
+                    </button>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Description</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scriptsTableBody">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Notifications tab (Activity feed) -->
+            <div class="card" id="tab-notifications" style="display:none;">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Activity Notifications</div>
+                        <div class="card-desc" id="notifDesc">Real-time activity from all users</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <select class="form-input" id="notifFilter" onchange="filterNotifications()" style="width:auto;">
+                            <option value="all">All events</option>
+                            <option value="executions">Executions</option>
+                            <option value="resets">HWID resets</option>
+                            <option value="failed">Failed attempts</option>
+                        </select>
+                        <button class="btn btn-danger" onclick="clearAllNotifications()">Clear All</button>
+                    </div>
+                </div>
+
+                <!-- Today's summary -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0;padding:16px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);">
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Executions Today</div>
+                        <div id="notifStatExecToday" style="font-size:24px;font-weight:700;color:var(--text-primary);margin-top:4px;">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">HWID Resets Today</div>
+                        <div id="notifStatResetToday" style="font-size:24px;font-weight:700;color:var(--text-primary);margin-top:4px;">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Failed Today</div>
+                        <div id="notifStatFailedToday" style="font-size:24px;font-weight:700;color:var(--danger);margin-top:4px;">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Unique Users Today</div>
+                        <div id="notifStatUsersToday" style="font-size:24px;font-weight:700;color:var(--text-primary);margin-top:4px;">-</div>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Event</th>
+                                <th>User</th>
+                                <th>Details</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="notifTableBody">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="display:flex;justify-content:center;margin-top:16px;">
+                    <button class="btn btn-ghost" id="notifLoadMore" onclick="loadMoreNotifications()" style="display:none;">Load more</button>
+                </div>
+            </div>
+
+            <!-- Sessions tab (Login history) -->
+            <div class="card" id="tab-sessions" style="display:none;">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Login Sessions</div>
+                        <div class="card-desc" id="sessionsDesc">Last 7 days of dashboard and admin logins</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <select class="form-input" id="sessionsFilter" onchange="filterSessions()" style="width:auto;">
+                            <option value="all">All logins</option>
+                            <option value="active">Active only</option>
+                            <option value="expired">Expired only</option>
+                            <option value="discord">Discord logins</option>
+                            <option value="admin_key">Admin key logins</option>
+                        </select>
+                        <input type="text" class="form-input" id="sessionsSearch" placeholder="Search user..." oninput="filterSessions()" style="width:180px;max-width:100%;">
+                    </div>
+                </div>
+
+                <!-- Summary stats -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0;padding:16px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);">
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Active Sessions</div>
+                        <div id="sessStatActive" style="font-size:24px;font-weight:700;color:#22c55e;margin-top:4px;">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Logins Today</div>
+                        <div id="sessStatToday" style="font-size:24px;font-weight:700;color:var(--text-primary);margin-top:4px;">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Admin Key Logins</div>
+                        <div id="sessStatAdmin" style="font-size:24px;font-weight:700;color:#f59e0b;margin-top:4px;">-</div>
+                    </div>
+                    <div>
+                        <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Unique Users (7d)</div>
+                        <div id="sessStatUnique" style="font-size:24px;font-weight:700;color:var(--text-primary);margin-top:4px;">-</div>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Method</th>
+                                <th>Location</th>
+                                <th>Device</th>
+                                <th>Logged in</th>
+                                <th>Last active</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessionsTableBody">
+                            <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="display:flex;justify-content:center;margin-top:16px;">
+                    <button class="btn btn-ghost" id="sessionsLoadMore" onclick="loadMoreSessions()" style="display:none;">Load more</button>
+                </div>
+            </div>
+
+            <!-- Toast container for real-time notifications -->
+            <div id="notifToastContainer" style="position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none;max-width:360px;"></div>
+
+        
+        </main>
+    </div>
+
+    <!-- Script Modal -->
+    <div class="modal-overlay" id="scriptModal">
+        <div class="modal" style="max-width:640px;">
+            <div class="modal-title" id="scriptModalTitle">Add New Script</div>
+            <div class="modal-desc">Configure the Lua script returned to users based on their plan.</div>
+
+            <div class="form-group">
+                <label class="form-label">Script Name</label>
+                <input type="text" class="form-input" id="scriptNameInput" placeholder="e.g. Main Script v2.0">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Description (optional)</label>
+                <input type="text" class="form-input" id="scriptDescInput" placeholder="Short description for admin panel">
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-group">
+                    <label class="form-label">Required Plan</label>
+                    <select class="form-select" id="scriptPlanInput">
+                        <option value="free">Free</option>
+                        <option value="pro" selected>Pro</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
+                    <div class="form-hint">Higher plans can access lower-tier scripts too</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <label style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-primary);border:1px solid var(--border-strong);border-radius:var(--radius-sm);cursor:pointer;">
+                        <input type="checkbox" id="scriptActiveInput" checked style="width:16px;height:16px;cursor:pointer;">
+                        <span>Active (returned to users)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Script Content (Lua)</label>
+                <textarea class="form-textarea" id="scriptContentInput" style="min-height:200px;font-family:'JetBrains Mono',monospace;font-size:13px;" placeholder="-- Paste your Lua script here"></textarea>
+                <div class="form-hint">This exact content will be returned to authorized users. Include your loader logic here.</div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeScriptModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveScript()">Save Script</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="js/admin.js"></script>
+
+    <!-- Clear Logs Modal -->
+    <div class="modal-overlay" id="clearLogsModal">
+        <div class="modal">
+            <div class="modal-title">Clear Audit Logs</div>
+            <div class="modal-desc">Deletes audit log entries from the database. This cannot be undone. Choose scope carefully.</div>
+
+            <div class="form-group">
+                <label class="form-label">What to delete</label>
+                <select class="form-select" id="clearLogsScope">
+                    <option value="7">Older than 7 days (safest - keeps recent trail)</option>
+                    <option value="30">Older than 30 days</option>
+                    <option value="1">Older than 1 day</option>
+                    <option value="all">Delete ALL logs (nuclear)</option>
+                </select>
+                <div class="form-hint">Recommended: keep at least 7 days for abuse investigation.</div>
+            </div>
+
+            <div class="form-group" id="clearLogsConfirmWrap" style="display:none;">
+                <label class="form-label" style="color:var(--danger);">Type DELETE to confirm</label>
+                <input type="text" class="form-input" id="clearLogsConfirm" placeholder="DELETE" style="font-family:'JetBrains Mono',monospace;">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeClearLogsModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="executeClearLogs()">Delete Logs</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Delete Keys Modal -->
+    <div class="modal-overlay" id="bulkDeleteModal">
+        <div class="modal">
+            <div class="modal-title">Bulk Delete Keys</div>
+            <div class="modal-desc">Deletes keys from the database. <strong>Active keys are never deleted</strong> via bulk - use individual revoke for those.</div>
+
+            <div class="form-group">
+                <label class="form-label">Which keys to delete</label>
+                <select class="form-select" id="bulkDeleteScope">
+                    <option value="unclaimed">Unclaimed keys only</option>
+                    <option value="revoked">Revoked keys only</option>
+                    <option value="expired">Expired keys only</option>
+                    <option value="unclaimed_revoked">Unclaimed + Revoked</option>
+                </select>
+                <div class="form-hint">Active keys are always preserved. This action is permanent.</div>
+            </div>
+
+            <div class="form-group" id="bulkDeleteConfirmWrap" style="display:none;">
+                <label class="form-label" style="color:var(--danger);">Type DELETE to confirm</label>
+                <input type="text" class="form-input" id="bulkDeleteConfirm" placeholder="DELETE" style="font-family:'JetBrains Mono',monospace;">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-ghost" onclick="closeBulkDeleteModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="executeBulkDelete()">Delete Keys</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Defensive: force show admin nav items when window.KEYORA_ROLE is set -->
+    <script>
+      (function() {
+        function applyRole() {
+          const role = window.KEYORA_ROLE;
+          if (!role) return false;
+          const isOwner = role === 'owner';
+          const isAdminOrOwner = role === 'owner' || role === 'admin';
+          document.querySelectorAll('[data-adminonly="true"]').forEach(el => {
+            const isAdminPanel = (el.id === 'adminLink') ||
+                                 ((el.getAttribute('href') || '').includes('admin.html'));
+            if (isAdminPanel) {
+              el.style.display = isOwner ? '' : 'none';
+            } else {
+              el.style.display = isAdminOrOwner ? '' : 'none';
+            }
+          });
+          return true;
+        }
+        let tries = 0;
+        const timer = setInterval(() => {
+          tries++;
+          if (applyRole() || tries > 100) clearInterval(timer);
+        }, 200);
+      })();
+    </script>
+</body>
+</html>
