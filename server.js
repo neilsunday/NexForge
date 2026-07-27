@@ -479,6 +479,31 @@ app.post('/api/admin/generate-keys', loginRateLimit, async (req, res) => {
             return res.status(500).json({ success: false, error: 'Admin key has no bound user' });
         }
 
+        // ---- Project ownership enforcement (admin tier can only mint for own projects) ----
+        // Owner (is_admin=true) can mint for any project. Admin key holder must own the project.
+        if (projectId) {
+            // Fetch project owner to enforce tenant isolation
+            const { data: projRow, error: projErr } = await sb.from('projects')
+                .select('owner_id').eq('id', projectId).maybeSingle();
+            if (projErr) {
+                console.error('Project ownership check error:', projErr);
+                return res.status(500).json({ success: false, error: 'Database error' });
+            }
+            if (!projRow) {
+                return res.status(404).json({ success: false, error: 'Project not found' });
+            }
+            // Check if the creator is the site owner (is_admin=true) â€” they bypass ownership
+            const { data: creatorRow } = await sb.from('users')
+                .select('is_admin').eq('id', creatorId).maybeSingle();
+            const isOwner = creatorRow?.is_admin === true;
+            if (!isOwner && projRow.owner_id !== creatorId) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'You can only generate keys for projects you own.'
+                });
+            }
+        }
+
         // ---- Optional: project match validation (warn only, we don't fail) ----
         if (projectId) {
             const { data: projMatch } = await sb.from('project_scripts')
