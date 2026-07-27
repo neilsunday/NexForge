@@ -1,4 +1,4 @@
-/* Keyora - Supabase Client (with role detection, v4 - Option C support) */
+/* Keyora - Supabase Client (v5 - DB-only, no localStorage sessions) */
 
 const SUPABASE_URL = 'https://miscyjgmvxbshvtiecuu.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pc2N5amdtdnhic2h2dGllY3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDgzMzAsImV4cCI6MjEwMDQ4NDMzMH0.yHDyDrOzRmQ2aDACRztb6roG45TUkAqLSxRslJoysgA';
@@ -15,6 +15,13 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 // ==================== AUTH ====================
 
 async function signInWithDiscord() {
+    // Nuke any stale admin-key session before OAuth (prevents role confusion after account switch)
+    try {
+        localStorage.removeItem('keyora_session');
+        localStorage.removeItem('nexaks_session');
+        localStorage.removeItem('nexaks_pending_discord');
+    } catch (_) {}
+
     const { error } = await sb.auth.signInWithOAuth({
         provider: 'discord',
         options: {
@@ -32,8 +39,9 @@ async function signOut() {
     try { await expireCurrentSession(); } catch (_) {}
     try {
         localStorage.removeItem('keyora_session');
-        localStorage.removeItem('nexaks_session'); // legacy cleanup
+        localStorage.removeItem('nexaks_session');
         localStorage.removeItem('nexaks_pending_discord');
+        localStorage.removeItem('keyora_session_row_id');
         sessionStorage.removeItem('nexaks_redirected');
     } catch (_) {}
     await sb.auth.signOut();
@@ -113,81 +121,58 @@ async function getUserProfileResilient(userId, maxAttempts = 5) {
     return null;
 }
 
-// ==================== ADMIN KEY SESSION HELPER ====================
-// Checks localStorage for a valid admin-key session (either new keyora_session or legacy nexaks_session format).
-// Returns the session object if valid, null otherwise. Works WITHOUT a Discord OAuth session.
-function getValidAdminKeySession() {
+// Check if user has an active admin key in the DB (no localStorage involved)
+async function hasActiveAdminKey(userId) {
+    if (!userId) return false;
     try {
-        // Try new format first
-        const raw = localStorage.getItem('keyora_session');
-        if (raw) {
-            const s = JSON.parse(raw);
-            const key = s?.admin_key || s?.key;
-            if (key && s?.is_admin === true && s?.expires_at && Date.now() < s.expires_at) {
-                return s;
-            }
-        }
-    } catch (_) {}
-
-    try {
-        // Fallback: legacy format
-        const raw = localStorage.getItem('nexaks_session');
-        if (raw) {
-            const s = JSON.parse(raw);
-            if (s?.key && s?.is_admin === true && 
-                s?.login_method && String(s.login_method).includes('admin_key') &&
-                s?.expires_at && Date.now() < s.expires_at) {
-                return s;
-            }
-        }
-    } catch (_) {}
-
-    return null;
+        const { data } = await sb
+            .from('keys')
+            .select('key, plan, status, expires_at')
+            .eq('user_id', userId)
+            .eq('plan', 'admin')
+            .eq('status', 'active')
+            .maybeSingle();
+        if (!data) return false;
+        // Check expiry
+        if (data.expires_at && new Date(data.expires_at) < new Date()) return false;
+        return true;
+    } catch (e) {
+        console.warn('[Keyora] admin key check failed:', e);
+        return false;
+    }
 }
 
-// ==================== ROLE DETECTION ====================
-// Three tiers:
-//   'owner' - is_admin=true in DB (only the first user gets this via SQL trigger)
-//   'admin' - valid admin-key session in localStorage (works with or without Discord)
-//   'user'  - regular Discord user, no admin key
-//   null    - not logged in at all (no Discord AND no admin key)
-//
-// PRIORITY:
-//   1. Owner check FIRST â€” DB is authoritative for owner status
-//   2. Admin-key session â€” works even WITHOUT Discord OAuth (Option C support)
-//   3. Regular user â€” has Discord OAuth but no admin key
+// ==================== ROLE DETECTION (DB-only) ====================
+// Three tiers, all resolved via DB queries:
+//   'owner' - is_admin=true in users table
+//   'admin' - has active admin-plan key bound to their user_id in keys table
+//   'user'  - Discord user with no admin key
+//   null    - not logged in
 
 async function getUserRole() {
-    // Step 1: Try to detect Discord user (may be null if only admin-key session)
     const user = await getCurrentUser();
-
-    // Step 2: If we have a Discord user, check if they're an OWNER via DB
-    if (user) {
-        const profile = await getUserProfileResilient(user.id);
-        if (profile?.is_admin === true) {
-            console.log('[Keyora] role: owner (DB is_admin=true, Discord+' + (user.email || user.id) + ')');
-            return 'owner';
-        }
+    if (!user) {
+        console.log('[Keyora] role: null (not logged in)');
+        return null;
     }
 
-    // Step 3: Check for admin-key session (works with OR without Discord)
-    // This is critical for Option C flow: user enters admin key, then does Discord OAuth,
-    // and on the OAuth callback we detect the admin_key session and elevate to 'admin' role.
-    const adminSession = getValidAdminKeySession();
-    if (adminSession) {
-        console.log('[Keyora] role: admin (admin_key session' + (user ? ' + Discord' : ' only') + ')');
+    // Step 1: Check owner status via users table (retries for slow networks)
+    const profile = await getUserProfileResilient(user.id);
+    if (profile?.is_admin === true) {
+        console.log('[Keyora] role: owner');
+        return 'owner';
+    }
+
+    // Step 2: Check for active admin key bound to this user
+    const isAdmin = await hasActiveAdminKey(user.id);
+    if (isAdmin) {
+        console.log('[Keyora] role: admin');
         return 'admin';
     }
 
-    // Step 4: If we have Discord but no admin key and not owner, they're a regular user
-    if (user) {
-        console.log('[Keyora] role: user (Discord only)');
-        return 'user';
-    }
-
-    // Step 5: Nothing â€” not logged in
-    console.log('[Keyora] role: null (not logged in)');
-    return null;
+    // Step 3: Regular Discord user
+    console.log('[Keyora] role: user');
+    return 'user';
 }
 
 async function isOwner() {
@@ -277,18 +262,20 @@ async function expireCurrentSession() {
     localStorage.removeItem(SESSION_ROW_KEY);
 }
 
-// Auto-run on client load
+// Auto-run on client load â€” track login + start heartbeat
+// Also nuke any stale admin-key session (v4 legacy) since we're now DB-only
 (async function autoTrackSession() {
     try {
+        // Nuke legacy admin-key sessions â€” role is DB-driven now
+        try {
+            localStorage.removeItem('keyora_session');
+            localStorage.removeItem('nexaks_session');
+            localStorage.removeItem('nexaks_pending_discord');
+        } catch (_) {}
+
         const user = await getCurrentUser();
         if (!user) return;
-        let loginMethod = 'discord';
-        // Detect if this is a Discord+admin_key session
-        const adminSession = getValidAdminKeySession();
-        if (adminSession) {
-            loginMethod = 'discord+admin_key';
-        }
-        await trackLoginSession(user, loginMethod);
+        await trackLoginSession(user, 'discord');
         startSessionHeartbeat();
     } catch (_) {}
 })();
@@ -302,7 +289,7 @@ window.Keyora = {
     getCurrentUser,
     getUserProfile,
     getUserProfileResilient,
-    getValidAdminKeySession,
+    hasActiveAdminKey,
     getSessionSafely,
     getUserRole,
     isOwner,
