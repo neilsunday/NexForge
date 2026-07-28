@@ -6,7 +6,8 @@
 const {
     Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes,
     EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder,
-    ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle
+    ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle,
+    Events, MessageFlags
 } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -154,6 +155,15 @@ const commands = [
 async function registerCommands() {
     const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
     try {
+        // ---- CLEANUP MODE: wipe stale global commands (fixes duplicate slash commands) ----
+        // Set env var CLEANUP_GLOBAL_COMMANDS=true, deploy once, then remove the var and redeploy.
+        if (process.env.CLEANUP_GLOBAL_COMMANDS === 'true') {
+            console.log('[CLEANUP MODE] Wiping all GLOBAL slash commands...');
+            await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
+            console.log('[CLEANUP MODE] Global commands wiped successfully.');
+            console.log('[CLEANUP MODE] IMPORTANT: Remove CLEANUP_GLOBAL_COMMANDS env var and redeploy to resume normal operation.');
+        }
+
         if (GUILD_ID) {
             await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
             console.log('Registered commands for guild ' + GUILD_ID);
@@ -289,11 +299,14 @@ async function assignProjectRole(memberOrInteraction, projectSlug) {
 }
 
 function generateKeyString() {
+    // Cryptographically secure â€” prevents timing/pattern-based key prediction
+    const crypto = require('crypto');
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const segs = [];
     for (let s = 0; s < 4; s++) {
         let seg = '';
-        for (let i = 0; i < 4; i++) seg += chars.charAt(Math.floor(Math.random() * chars.length));
+        const bytes = crypto.randomBytes(4);
+        for (let i = 0; i < 4; i++) seg += chars.charAt(bytes[i] % chars.length);
         segs.push(seg);
     }
     return 'NXKS-' + segs.join('-');
@@ -829,7 +842,6 @@ async function handleGetRole(interaction) {
 }
 
 async function handleResetHwid(interaction, fromButton) {
-    const reply = fromButton ? 'editReply' : 'editReply';
     const { data: user } = await sb.from('users').select('*').eq('discord_id', interaction.user.id).maybeSingle();
     if (!user) {
         const msg = { embeds: [embed('No Account', 'Redeem a key first.', 0xef4444)], components: [] };
@@ -1478,7 +1490,7 @@ function startExpiryScheduler() {
 }
 
 // ========== Startup ==========
-client.once('clientReady', async () => {
+client.once(Events.ClientReady, async () => {
     console.log('NexaKS bot logged in as ' + client.user.tag);
     global.botStatus = 'online (' + client.user.tag + ')';
     await registerCommands();
