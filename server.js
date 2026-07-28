@@ -344,11 +344,11 @@ app.post('/api/bind-admin-key', loginRateLimit, async (req, res) => {
         if (keyRow.status === 'revoked') return res.status(400).json({ success: false, error: 'Key revoked' });
         if (keyRow.status === 'expired') return res.status(400).json({ success: false, error: 'Key expired' });
 
-        // Already bound to this same user â€” treat as success (idempotent)
+        // Already bound to this same user Ã¢â‚¬â€ treat as success (idempotent)
         if (keyRow.user_id && keyRow.user_id === userId) {
             return res.json({ success: true, already_bound: true });
         }
-        // Already bound to a different user â€” reject
+        // Already bound to a different user Ã¢â‚¬â€ reject
         if (keyRow.user_id && keyRow.user_id !== userId) {
             return res.status(409).json({ success: false, error: 'Key already claimed by another user' });
         }
@@ -364,7 +364,7 @@ app.post('/api/bind-admin-key', loginRateLimit, async (req, res) => {
             console.error('Bind admin key user lookup error:', userError);
             return res.status(500).json({ success: false, error: 'Database error' });
         }
-        if (!userRow) return res.status(404).json({ success: false, error: 'User not found â€” please complete Discord login first' });
+        if (!userRow) return res.status(404).json({ success: false, error: 'User not found Ã¢â‚¬â€ please complete Discord login first' });
         if (userRow.is_banned) return res.status(403).json({ success: false, error: 'User is banned' });
 
         // Compute expires_at if not set and duration_days is set
@@ -415,12 +415,15 @@ app.post('/api/bind-admin-key', loginRateLimit, async (req, res) => {
 //   - Bulk-inserts with collision-safe unique key strings
 // ========================================
 const KEY_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const crypto = require('crypto');
 function generateKeyString() {
+    // Cryptographically secure â€” prevents timing/pattern-based key prediction
     let out = 'NXKS-';
     for (let s = 0; s < 4; s++) {
         if (s > 0) out += '-';
+        const bytes = crypto.randomBytes(4);
         for (let i = 0; i < 4; i++) {
-            out += KEY_CHARS.charAt(Math.floor(Math.random() * KEY_CHARS.length));
+            out += KEY_CHARS.charAt(bytes[i] % KEY_CHARS.length);
         }
     }
     return out;
@@ -492,7 +495,7 @@ app.post('/api/admin/generate-keys', loginRateLimit, async (req, res) => {
             if (!projRow) {
                 return res.status(404).json({ success: false, error: 'Project not found' });
             }
-            // Check if the creator is the site owner (is_admin=true) â€” they bypass ownership
+            // Check if the creator is the site owner (is_admin=true) Ã¢â‚¬â€ they bypass ownership
             const { data: creatorRow } = await sb.from('users')
                 .select('is_admin').eq('id', creatorId).maybeSingle();
             const isOwner = creatorRow?.is_admin === true;
